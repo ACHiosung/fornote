@@ -8,7 +8,7 @@ class NoteData {
         // 기본 메타데이터
         this.bpm = 120;
         this.timeSignature = { numerator: 4, denominator: 4 };
-        this.slotsPerBeat = 4; // 16분음표 기본 (1박=4슬롯)
+        this.slotsPerBeat = 12; // LCM(분모4, 3) = 12 (16분음표+셋잇단 모두 표현)
         this.totalMeasures = 40;
 
         // 마디 크기(슬롯 수) 계산
@@ -29,8 +29,10 @@ class NoteData {
         this.timeSignature.denominator = den;
         this.slotsPerBeat = slotsPerBeat;
         this.totalMeasures = totalMeasures;
-        this.slotsPerMeasure = Math.floor(num * slotsPerBeat * (4 / den));
-        console.log(`Metadata updated: BPM=${this.bpm}, TS=${num}/${den}, slotsPerMeasure=${this.slotsPerMeasure}`);
+        // slotsPerBeat는 이미 분모(den) 기준이므로, 단순히 분자 × slotsPerBeat
+        // 예: 4/4 → 4 * 12 = 48, 6/8 → 6 * 24 = 144, 4/16 → 4 * 48 = 192
+        this.slotsPerMeasure = num * slotsPerBeat;
+        console.log(`Metadata updated: BPM=${this.bpm}, TS=${num}/${den}, slotsPerBeat=${slotsPerBeat}, slotsPerMeasure=${this.slotsPerMeasure}`);
     }
 
     // 마디의 특정 레인 데이터 문자열 가져오기

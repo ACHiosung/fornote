@@ -136,13 +136,27 @@ class GridRenderer {
         const gridEndX = gridStartX + (this.laneNames.length * this.laneWidth);
 
         // ===== 1. 그리드 가로선 =====
+        // slotsPerBeat = LCM(분모, 3) → 동적 계산
+        //   분모4 → spb=12:  16분음표=3슬롯, 셋잇단=4슬롯
+        //   분모8 → spb=24:  16분음표=6슬롯, 셋잇단=8슬롯
+        //   분모16→ spb=48:  16분음표=12슬롯, 셋잇단=16슬롯
+        const spb = this.noteData.slotsPerBeat;
+        const sixteenthInterval = spb / 4;   // 16분음표 간격 (spb/4)
+        const tripletInterval = spb / 3;     // 셋잇단음표 간격 (spb/3)
+
         ctx.lineWidth = 1;
         for (let m = 1; m <= this.noteData.totalMeasures; m++) {
             for (let s = 0; s < this.noteData.slotsPerMeasure; s++) {
                 const y = this.getY(m, s);
                 if (y < -50 || y > this.height + 50) continue;
 
-                if (s === 0) {
+                const isMeasureLine = (s === 0);
+                const isBeatLine = (!isMeasureLine && s % spb === 0);
+                const is16th = (s % sixteenthInterval === 0);
+                const isTriplet = (s % tripletInterval === 0);
+
+                if (isMeasureLine) {
+                    // ── 마디선 (굵은 흰색) ──
                     ctx.strokeStyle = "rgba(255,255,255,0.5)";
                     ctx.lineWidth = 2;
                     ctx.beginPath(); ctx.moveTo(gridStartX, y); ctx.lineTo(gridEndX, y); ctx.stroke();
@@ -151,11 +165,27 @@ class GridRenderer {
                     ctx.font = "12px monospace";
                     ctx.textAlign = "right";
                     ctx.fillText(`#${m.toString().padStart(3, '0')}`, gridEndX + this.measureLabelWidth - 10, y + 4);
-                } else if (s % this.noteData.slotsPerBeat === 0) {
-                    ctx.strokeStyle = "rgba(255,255,255,0.2)";
+                } else if (isBeatLine) {
+                    // ── 박 선 (중간 밝기) ──
+                    ctx.strokeStyle = "rgba(255,255,255,0.25)";
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath(); ctx.moveTo(gridStartX, y); ctx.lineTo(gridEndX, y); ctx.stroke();
+                    ctx.lineWidth = 1;
+                } else if (is16th && isTriplet) {
+                    // ── 16분음표와 셋잇단이 겹치는 위치 ──
+                    ctx.strokeStyle = "rgba(255,255,255,0.15)";
+                    ctx.beginPath(); ctx.moveTo(gridStartX, y); ctx.lineTo(gridEndX, y); ctx.stroke();
+                } else if (is16th) {
+                    // ── 16분음표 선 (파란 계열) ──
+                    ctx.strokeStyle = "rgba(130,180,255,0.15)";
+                    ctx.beginPath(); ctx.moveTo(gridStartX, y); ctx.lineTo(gridEndX, y); ctx.stroke();
+                } else if (isTriplet) {
+                    // ── 셋잇단음표 선 (노란 계열) ──
+                    ctx.strokeStyle = "rgba(255,200,80,0.15)";
                     ctx.beginPath(); ctx.moveTo(gridStartX, y); ctx.lineTo(gridEndX, y); ctx.stroke();
                 } else {
-                    ctx.strokeStyle = "rgba(255,255,255,0.05)";
+                    // ── 기타 세분 슬롯 ──
+                    ctx.strokeStyle = "rgba(255,255,255,0.03)";
                     ctx.beginPath(); ctx.moveTo(gridStartX, y); ctx.lineTo(gridEndX, y); ctx.stroke();
                 }
             }

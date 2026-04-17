@@ -1,6 +1,13 @@
 /**
  * MidiParser - @tonejs/midi 래퍼, MIDI 로드 및 노트 자동 인식
  * BPM, 박자, 곡 길이(마디 수)를 MIDI 파일에서 자동으로 읽어옵니다.
+ *
+ * ────────────────────────────────────────────
+ *   해상도 = LCM(박자 분모, 3)
+ *   → 분모 4  → LCM(4, 3)  = 12 slots/beat
+ *   → 분모 8  → LCM(8, 3)  = 24 slots/beat
+ *   → 분모 16 → LCM(16, 3) = 48 slots/beat
+ * ────────────────────────────────────────────
  */
 
 class MidiParser {
@@ -19,6 +26,33 @@ class MidiParser {
             console.error('[MidiParser] @tonejs/midi 라이브러리가 로드되지 않았습니다!');
             this.MidiClass = null;
         }
+    }
+
+    // 최대공약수 (GCD)
+    _gcd(a, b) {
+        a = Math.abs(a);
+        b = Math.abs(b);
+        while (b) {
+            [a, b] = [b, a % b];
+        }
+        return a;
+    }
+
+    // 최소공배수 (LCM)
+    _lcm(a, b) {
+        return (a * b) / this._gcd(a, b);
+    }
+
+    /**
+     * 박자 분모(denominator)에서 slotsPerBeat 계산
+     * 분모가 곧 1박 내 기본 분할 수이며, 셋잇단음표를 위해 3과의 LCM을 취함
+     *
+     *   den=4  → LCM(4, 3)  = 12
+     *   den=8  → LCM(8, 3)  = 24
+     *   den=16 → LCM(16, 3) = 48
+     */
+    _calcSlotsPerBeat(denominator) {
+        return this._lcm(denominator, 3);
     }
 
     async parseFromBuffer(arrayBuffer) {
@@ -48,6 +82,12 @@ class MidiParser {
                 tsDen = ts[1]; // 분모
             }
 
+            // PPQ (Pulses Per Quarter Note) 추출 — tick 기반 정밀 변환에 사용
+            const ppq = (midi.header && midi.header.ppq) ? midi.header.ppq : 480;
+
+            // ────── 핵심: slotsPerBeat = LCM(분모, 3) ──────
+            const slotsPerBeat = this._calcSlotsPerBeat(tsDen);
+
             // 곡 길이(초) → 총 마디 수 계산
             const durationSec = midi.duration; // 전체 길이 (초)
             const secondsPerBeat = 60 / bpm;
@@ -56,9 +96,13 @@ class MidiParser {
             let totalMeasures = Math.ceil(durationSec / secondsPerMeasure) + 1; // 여유 1마디 추가
             if (totalMeasures < 1) totalMeasures = 1;
 
-            const slotsPerBeat = 4; // 16분음표 해상도 고정
-
-            console.log(`[MidiParser] 자동 인식: BPM=${bpm}, 박자=${tsNum}/${tsDen}, 곡 길이=${durationSec.toFixed(1)}초, 총 마디=${totalMeasures}`);
+            console.log(`[MidiParser] ──────────────────────────────`);
+            console.log(`[MidiParser] BPM = ${bpm}`);
+            console.log(`[MidiParser] 박자 = ${tsNum}/${tsDen}`);
+            console.log(`[MidiParser] PPQ = ${ppq}`);
+            console.log(`[MidiParser] slotsPerBeat = LCM(${tsDen}, 3) = ${slotsPerBeat}`);
+            console.log(`[MidiParser] 곡 길이 = ${durationSec.toFixed(1)}초, 총 마디 = ${totalMeasures}`);
+            console.log(`[MidiParser] ──────────────────────────────`);
 
             // ========== 2. noteData & UI 업데이트 ==========
             this.noteData.updateMetadata(bpm, tsNum, tsDen, slotsPerBeat, totalMeasures);
@@ -73,19 +117,41 @@ class MidiParser {
             this.noteData.lanes['normal_2'] = {};
             this.noteData.lanes['normal_3'] = {};
 
-            // ========== 3. 노트 배치 ==========
+            // ========== 3. 노트 배치 ─ tick 기반 정밀 변환 ==========
             const slotsPerMeasure = this.noteData.slotsPerMeasure;
+
+            // MIDI PPQ 는 4분음표 기준이므로, 4분음표 = PPQ ticks
+            // 1박(분모에 의한)의 tick 수 = ppq * (4 / tsDen)
+            const ticksPerBeat = ppq * (4 / tsDen);
+            const ticksPerSlot = ticksPerBeat / slotsPerBeat;
+
             let noteCount = 0;
             let skippedCount = 0;
+            let quantizeWarnings = 0;
 
             midi.tracks.forEach((track, ti) => {
                 if (track.notes.length === 0) return;
                 console.log(`[MidiParser] 트랙 ${ti} (${track.name || '이름없음'}): ${track.notes.length} 노트`);
 
                 track.notes.forEach((note, ni) => {
-                    // note.time은 초 단위 (MIDI 파일 자체 템포로 이미 변환됨)
-                    const beatsElapsed = note.time / secondsPerBeat;
-                    const absSlot = Math.round(beatsElapsed * slotsPerBeat);
+                    let absSlot;
+
+                    if (typeof note.ticks === 'number') {
+                        // ── tick 기반 변환 (가장 정확) ──
+                        const rawSlot = note.ticks / ticksPerSlot;
+                        absSlot = Math.round(rawSlot);
+
+                        // 양자화 오차가 0.1슬롯 이상이면 경고
+                        const error = Math.abs(rawSlot - absSlot);
+                        if (error > 0.1 && quantizeWarnings < 20) {
+                            console.warn(`  ⚠ note[${ni}] tick=${note.ticks}, rawSlot=${rawSlot.toFixed(3)} → quantized to ${absSlot} (error=${error.toFixed(3)})`);
+                            quantizeWarnings++;
+                        }
+                    } else {
+                        // tick이 없는 경우 시간 기반 폴백
+                        const beatsElapsed = note.time / secondsPerBeat;
+                        absSlot = Math.round(beatsElapsed * slotsPerBeat);
+                    }
 
                     const { measureIndex, slotIndex } = this.noteData.getMeasureAndSlotFromAbsolute(absSlot);
 
@@ -94,8 +160,9 @@ class MidiParser {
                         return;
                     }
 
-                    if (ni < 5 && ti === 0) {
-                        console.log(`  note[${ni}]: time=${note.time.toFixed(3)}s, beat=${beatsElapsed.toFixed(2)}, slot=${absSlot} → measure #${measureIndex}, pos ${slotIndex}`);
+                    if (ni < 10 && ti === 0) {
+                        const tickInfo = typeof note.ticks === 'number' ? `tick=${note.ticks}` : '';
+                        console.log(`  note[${ni}]: time=${note.time.toFixed(3)}s, ${tickInfo}, slot=${absSlot} → measure #${measureIndex}, pos ${slotIndex}/${slotsPerMeasure}`);
                     }
 
                     this.noteData.setSlot('normal_1', measureIndex, slotIndex, '1');
@@ -103,6 +170,9 @@ class MidiParser {
                 });
             });
 
+            if (quantizeWarnings > 0) {
+                console.warn(`[MidiParser] ${quantizeWarnings}개 노트에서 양자화 경고 발생 (해상도 밖의 리듬일 수 있음)`);
+            }
             console.log(`[MidiParser] 완료: ${noteCount}개 배치, ${skippedCount}개 범위 초과 스킵`);
 
             // ========== 4. 첫 노트 마디 찾기 & 자동 스크롤 ==========
@@ -118,7 +188,7 @@ class MidiParser {
                 this.showNotification('⚠️ MIDI 파일에서 노트를 찾을 수 없습니다.', true);
                 this.renderer.render();
             } else {
-                this.showNotification(`✅ BPM=${bpm}, ${tsNum}/${tsDen}박, ${totalMeasures}마디, ${noteCount}개 노트 로드`);
+                this.showNotification(`✅ BPM=${bpm}, ${tsNum}/${tsDen}박, slotsPerBeat=${slotsPerBeat}, ${totalMeasures}마디, ${noteCount}개 노트 로드`);
                 if (firstMeasureWithNote > 0) {
                     this.renderer.scrollToMeasure(firstMeasureWithNote);
                 } else {
