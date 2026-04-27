@@ -135,10 +135,20 @@ class NoteData {
     exportToTXT() {
         let txt = `#BPM ${this.bpm}\n`;
 
-        // BPM 변화 헤더 라인 (#BPMCHANGE 형식) – measureIndex는 1-indexed
+        // ── BPM 변화 정의 헤더: 고유 BPM 값마다 #BPMxx value ──
+        // 동일한 BPM 값은 같은 인덱스(01, 02, ..., 0A, 0B, ...)를 공유
+        const bpmValueSet = new Set();
         for (const change of this.bpmChanges) {
-            const bar = (change.measureIndex - 1).toString().padStart(3, '0');
-            txt += `#BPMCHANGE ${bar} 08 ${change.bpm}\n`;
+            bpmValueSet.add(change.bpm);
+        }
+        const bpmValues = Array.from(bpmValueSet).sort((a, b) => a - b);
+        // bpm 값 → 2자리 대문자 16진수 인덱스 ("01", "02", "0A", ...)
+        const bpmIndexMap = new Map();
+        bpmValues.forEach((val, i) => {
+            bpmIndexMap.set(val, (i + 1).toString(16).padStart(2, '0').toUpperCase());
+        });
+        for (const [val, idx] of bpmIndexMap) {
+            txt += `#BPM${idx} ${val}\n`;
         }
 
         txt += `*---------------------- MAIN DATA FIELD\n`;
@@ -175,6 +185,36 @@ class NoteData {
                 if (mData.includes('1')) {
                     const bar = (m - 1).toString().padStart(3, '0');
                     txt += `#${bar}${channel.toString().padStart(2, '0')}:${mData}\n`;
+                }
+            }
+        }
+
+        // ── BPM 변화 채널 (channel 08) ──
+        // 마디별로 그룹핑한 뒤, 슬롯 배열을 구성해 노트처럼 출력
+        if (this.bpmChanges.length > 0) {
+            const bpmByMeasure = new Map();
+            for (const change of this.bpmChanges) {
+                if (!bpmByMeasure.has(change.measureIndex)) {
+                    bpmByMeasure.set(change.measureIndex, []);
+                }
+                bpmByMeasure.get(change.measureIndex).push(change);
+            }
+
+            // 마디 순서대로 정렬해 출력
+            const sortedMeasures = Array.from(bpmByMeasure.keys()).sort((a, b) => a - b);
+            for (const measureIndex of sortedMeasures) {
+                const bar = (measureIndex - 1).toString().padStart(3, '0');
+                const slots = new Array(this.slotsPerMeasure).fill('00');
+                for (const change of bpmByMeasure.get(measureIndex)) {
+                    const idx = bpmIndexMap.get(change.bpm);
+                    if (idx !== undefined && change.slotIndex >= 0 && change.slotIndex < this.slotsPerMeasure) {
+                        slots[change.slotIndex] = idx;
+                    }
+                }
+                const lineData = slots.join('');
+                // 모든 슬롯이 '00'이 아닐 때만 출력
+                if (lineData !== '00'.repeat(this.slotsPerMeasure)) {
+                    txt += `#${bar}08:${lineData}\n`;
                 }
             }
         }
