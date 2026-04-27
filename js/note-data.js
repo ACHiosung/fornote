@@ -17,6 +17,9 @@ class NoteData {
         // BPM 변화 기록: [{ measureIndex, slotIndex, bpm }, ...]  (measureIndex는 1-indexed)
         this.bpmChanges = [];
 
+        // 박자 변화 기록: [{ measureIndex, slotIndex, numerator, denominator }, ...]
+        this.tsChanges = [];
+
         // 9개 행 초기화
         this.lanes = {
             normal_1: {}, normal_2: {}, normal_3: {},
@@ -35,8 +38,9 @@ class NoteData {
         // slotsPerBeat는 이미 분모(den) 기준이므로, 단순히 분자 × slotsPerBeat
         // 예: 4/4 → 4 * 12 = 48, 6/8 → 6 * 24 = 144, 4/16 → 4 * 48 = 192
         this.slotsPerMeasure = num * slotsPerBeat;
-        // MIDI 파일 로드 시 BPM 변화 기록 초기화 (MIDI 파일 자체에서 재설정됨)
+        // MIDI 파일 로드 시 BPM/박자 변화 기록 초기화 (MIDI 파일 자체에서 재설정됨)
         this.bpmChanges = [];
+        this.tsChanges = [];
         console.log(`Metadata updated: BPM=${this.bpm}, TS=${num}/${den}, slotsPerBeat=${slotsPerBeat}, slotsPerMeasure=${this.slotsPerMeasure}`);
     }
 
@@ -120,6 +124,22 @@ class NoteData {
             this.lanes[lane] = {};
         }
         this.bpmChanges = [];
+        this.tsChanges = [];
+    }
+
+    // 박자 변화 추가 (같은 위치에 이미 있으면 교체)
+    addTsChange(measureIndex, slotIndex, numerator, denominator) {
+        this.tsChanges = this.tsChanges.filter(
+            c => !(c.measureIndex === measureIndex && c.slotIndex === slotIndex)
+        );
+        this.tsChanges.push({ measureIndex, slotIndex, numerator, denominator });
+    }
+
+    // 박자 변화 삭제
+    removeTsChange(measureIndex, slotIndex) {
+        this.tsChanges = this.tsChanges.filter(
+            c => !(c.measureIndex === measureIndex && c.slotIndex === slotIndex)
+        );
     }
 
     // MIDI에서 추출된 노트를 Normal 1에만 추가합니다.
@@ -133,31 +153,66 @@ class NoteData {
 
     // 데이터를 Export 포맷 텍스트로 변환 (txtTojson.cs 호환 형식)
     exportToTXT() {
-        // 박자(시그니처)를 반영한 실제 BPM 계산:
-        // 4/4 기준으로 환산 → adjustedBpm = bpm * denominator / numerator
-        // 예) 2/4, BPM 100 → 100 * 4/2 = 200
-        const { numerator, denominator } = this.timeSignature;
-        const adjustBpm = (bpm) => {
-            const adjusted = bpm * denominator / numerator;
-            return Number.isInteger(adjusted) ? adjusted : Math.round(adjusted * 100) / 100;
+        // ── 유효 BPM 계산 (4/4 기준 환산): rawBpm * den / num ──
+        const computeEffectiveBpm = (rawBpm, num, den) => {
+            const v = rawBpm * den / num;
+            return Number.isInteger(v) ? v : Math.round(v * 100) / 100;
         };
 
-        let txt = `#BPM ${adjustBpm(this.bpm)}\n`;
+        const initNum = this.timeSignature.numerator;
+        const initDen = this.timeSignature.denominator;
+        let txt = `#BPM ${computeEffectiveBpm(this.bpm, initNum, initDen)}\n`;
 
-        // ── BPM 변화 정의 헤더: 고유 BPM 값마다 #BPMxx value ──
-        // 동일한 BPM 값은 같은 인덱스(01, 02, ..., 0A, 0B, ...)를 공유
-        const bpmValueSet = new Set();
-        for (const change of this.bpmChanges) {
-            bpmValueSet.add(change.bpm);
+        // ── bpmChanges + tsChanges를 절대 슬롯 위치 기준으로 병합 ──
+        // 같은 위치에서 BPM 변경을 먼저, 박자 변경을 나중에 적용
+        const allEvents = [];
+        for (const c of this.bpmChanges) {
+            allEvents.push({
+                absSlot: (c.measureIndex - 1) * this.slotsPerMeasure + c.slotIndex,
+                measureIndex: c.measureIndex, slotIndex: c.slotIndex,
+                type: 'bpm', bpm: c.bpm,
+            });
         }
-        const bpmValues = Array.from(bpmValueSet).sort((a, b) => a - b);
-        // bpm 값 → 2자리 대문자 16진수 인덱스 ("01", "02", "0A", ...)
+        for (const c of this.tsChanges) {
+            allEvents.push({
+                absSlot: (c.measureIndex - 1) * this.slotsPerMeasure + c.slotIndex,
+                measureIndex: c.measureIndex, slotIndex: c.slotIndex,
+                type: 'ts', numerator: c.numerator, denominator: c.denominator,
+            });
+        }
+        allEvents.sort((a, b) => a.absSlot - b.absSlot || (a.type === 'bpm' ? -1 : 1));
+
+        // 상태를 추적하며 각 변경 시점의 유효 BPM을 계산
+        let curBpm = this.bpm;
+        let curNum = initNum;
+        let curDen = initDen;
+        const effectiveChanges = [];
+        let i = 0;
+        while (i < allEvents.length) {
+            const posSlot = allEvents[i].absSlot;
+            const { measureIndex, slotIndex } = allEvents[i];
+            while (i < allEvents.length && allEvents[i].absSlot === posSlot) {
+                const ev = allEvents[i];
+                if (ev.type === 'bpm') curBpm = ev.bpm;
+                else { curNum = ev.numerator; curDen = ev.denominator; }
+                i++;
+            }
+            effectiveChanges.push({
+                measureIndex,
+                slotIndex,
+                effectiveBpm: computeEffectiveBpm(curBpm, curNum, curDen),
+            });
+        }
+
+        // ── 고유 유효 BPM 값 → 2자리 대문자 16진수 인덱스 매핑 ──
+        const effectiveBpmSet = new Set(effectiveChanges.map(c => c.effectiveBpm));
+        const effectiveBpmValues = Array.from(effectiveBpmSet).sort((a, b) => a - b);
         const bpmIndexMap = new Map();
-        bpmValues.forEach((val, i) => {
-            bpmIndexMap.set(val, (i + 1).toString(16).padStart(2, '0').toUpperCase());
+        effectiveBpmValues.forEach((val, idx) => {
+            bpmIndexMap.set(val, (idx + 1).toString(16).padStart(2, '0').toUpperCase());
         });
         for (const [val, idx] of bpmIndexMap) {
-            txt += `#BPM${idx} ${adjustBpm(val)}\n`;
+            txt += `#BPM${idx} ${val}\n`;
         }
 
         txt += `*---------------------- MAIN DATA FIELD\n`;
@@ -198,30 +253,27 @@ class NoteData {
             }
         }
 
-        // ── BPM 변화 채널 (channel 08) ──
-        // 마디별로 그룹핑한 뒤, 슬롯 배열을 구성해 노트처럼 출력
-        if (this.bpmChanges.length > 0) {
-            const bpmByMeasure = new Map();
-            for (const change of this.bpmChanges) {
-                if (!bpmByMeasure.has(change.measureIndex)) {
-                    bpmByMeasure.set(change.measureIndex, []);
+        // ── 유효 BPM 변화 채널 (channel 08): bpmChanges + tsChanges 통합 ──
+        if (effectiveChanges.length > 0) {
+            const changesByMeasure = new Map();
+            for (const change of effectiveChanges) {
+                if (!changesByMeasure.has(change.measureIndex)) {
+                    changesByMeasure.set(change.measureIndex, []);
                 }
-                bpmByMeasure.get(change.measureIndex).push(change);
+                changesByMeasure.get(change.measureIndex).push(change);
             }
 
-            // 마디 순서대로 정렬해 출력
-            const sortedMeasures = Array.from(bpmByMeasure.keys()).sort((a, b) => a - b);
+            const sortedMeasures = Array.from(changesByMeasure.keys()).sort((a, b) => a - b);
             for (const measureIndex of sortedMeasures) {
                 const bar = (measureIndex - 1).toString().padStart(3, '0');
                 const slots = new Array(this.slotsPerMeasure).fill('00');
-                for (const change of bpmByMeasure.get(measureIndex)) {
-                    const idx = bpmIndexMap.get(change.bpm);
+                for (const change of changesByMeasure.get(measureIndex)) {
+                    const idx = bpmIndexMap.get(change.effectiveBpm);
                     if (idx !== undefined && change.slotIndex >= 0 && change.slotIndex < this.slotsPerMeasure) {
                         slots[change.slotIndex] = idx;
                     }
                 }
                 const lineData = slots.join('');
-                // 모든 슬롯이 '00'이 아닐 때만 출력
                 if (lineData !== '00'.repeat(this.slotsPerMeasure)) {
                     txt += `#${bar}08:${lineData}\n`;
                 }

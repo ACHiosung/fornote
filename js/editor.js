@@ -74,6 +74,35 @@ class Editor {
             // BPM 변화 레인은 읽기 전용 – 편집 불가
             if (info.laneName === 'bpm_change') return;
 
+            // 박자 변화 레인 – 클릭으로 추가/삭제
+            if (info.laneName === 'ts_change') {
+                let { measureIndex, slotIndex } = this.noteData.getMeasureAndSlotFromAbsolute(info.absSlot);
+                if (this.currentMode === 'delete') {
+                    this.noteData.removeTsChange(measureIndex, slotIndex);
+                } else {
+                    const existing = this.noteData.tsChanges.find(
+                        c => c.measureIndex === measureIndex && c.slotIndex === slotIndex
+                    );
+                    if (existing) {
+                        // 같은 위치 재클릭 → 삭제
+                        this.noteData.removeTsChange(measureIndex, slotIndex);
+                    } else {
+                        const input = window.prompt('박자 변경 입력 (예: 3/4, 2/4)', '3/4');
+                        if (!input) return;
+                        const parts = input.trim().split('/');
+                        const num = parseInt(parts[0], 10);
+                        const den = parseInt(parts[1], 10);
+                        if (parts.length !== 2 || isNaN(num) || isNaN(den) || num <= 0 || den <= 0) {
+                            alert('올바른 박자 형식이 아닙니다. (예: 3/4)');
+                            return;
+                        }
+                        this.noteData.addTsChange(measureIndex, slotIndex, num, den);
+                    }
+                }
+                this.renderer.render();
+                return;
+            }
+
             // 지우개 모드
             if (this.currentMode === 'delete') {
                 let { measureIndex, slotIndex } = this.noteData.getMeasureAndSlotFromAbsolute(info.absSlot);
