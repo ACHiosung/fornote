@@ -248,3 +248,95 @@ canvas {
 .info-group {
     font-size: 0.85rem;
 }
+
+/* Recording Panel */
+.record-panel {
+    background-color: var(--bg-toolbar);
+    border-bottom: 1px solid var(--border-color);
+    padding: 8px 16px;
+}
+
+.record-panel.hidden {
+    display: none;
+}
+
+.record-panel-inner {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.record-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.record-label {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.record-select {
+    background-color: #2a2a4a;
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-family: inherit;
+    font-size: 0.82rem;
+    cursor: pointer;
+}
+
+.record-number-input {
+    background-color: #2a2a4a;
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-family: inherit;
+    font-size: 0.82rem;
+    width: 70px;
+    text-align: center;
+}
+
+.record-number-input:disabled,
+.record-select:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.record-status {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    padding: 4px 10px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.05);
+    white-space: nowrap;
+}
+
+.record-status.recording {
+    color: #ff4060;
+    background: rgba(255, 64, 96, 0.15);
+    animation: blink 1s step-start infinite;
+}
+
+.record-clock-bpm {
+    font-size: 0.78rem;
+    color: #00e676;
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: rgba(0, 230, 118, 0.12);
+    white-space: nowrap;
+}
+
+.record-clock-bpm.hidden {
+    display: none;
+}
+
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.3; }
+}

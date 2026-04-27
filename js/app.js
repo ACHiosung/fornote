@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const editor = new Editor('grid-canvas', noteData, renderer);
     const midiParser = new MidiParser(noteData, renderer);
     const exporter = new Exporter(noteData);
+    const midiRecorder = new MidiInputRecorder(noteData, renderer);
 
     // 2. 편집 모드 버튼
     const modeBtns = document.querySelectorAll('.tool-btn');
@@ -61,7 +62,147 @@ document.addEventListener('DOMContentLoaded', () => {
         renderer.zoomFit();
     });
 
-    // 7. 초기 렌더링
+    // ─────────────────────────────────────────────
+    //  7. MIDI 녹음 패널
+    // ─────────────────────────────────────────────
+
+    const recordPanel       = document.getElementById('record-panel');
+    const recordInitBtn     = document.getElementById('midi-record-init-btn');
+    const deviceSelect      = document.getElementById('record-device-select');
+    const refreshBtn        = document.getElementById('record-refresh-btn');
+    const laneSelect        = document.getElementById('record-lane-select');
+    const bpmInput          = document.getElementById('record-bpm-input');
+    const startBtn          = document.getElementById('record-start-btn');
+    const stopBtn           = document.getElementById('record-stop-btn');
+    const bpmChangeBtn      = document.getElementById('record-bpmchange-btn');
+    const bpmChangeInput    = document.getElementById('record-bpmchange-input');
+    const statusLabel       = document.getElementById('record-status');
+    const clockBpmLabel     = document.getElementById('record-clock-bpm');
+
+    // 장치 목록을 select에 채우는 헬퍼
+    function populateDevices() {
+        const devices = midiRecorder.getInputDevices();
+        const current = deviceSelect.value;
+        deviceSelect.innerHTML = '<option value="">-- 장치 선택 --</option>';
+        devices.forEach(d => {
+            const opt = document.createElement('option');
+            opt.value = d.id;
+            opt.textContent = d.name;
+            deviceSelect.appendChild(opt);
+        });
+        // 이전 선택 복원
+        if (current) deviceSelect.value = current;
+
+        if (devices.length === 0) {
+            deviceSelect.innerHTML = '<option value="">장치 없음</option>';
+        }
+    }
+
+    // 녹음 패널 토글 버튼 – 처음 열 때 MIDI 초기화
+    let midiInitialized = false;
+    recordInitBtn.addEventListener('click', async () => {
+        const isHidden = recordPanel.classList.contains('hidden');
+        if (isHidden) {
+            recordPanel.classList.remove('hidden');
+            if (!midiInitialized) {
+                statusLabel.textContent = 'MIDI 초기화 중…';
+                const inputs = await midiRecorder.init();
+                midiInitialized = true;
+                if (inputs) {
+                    populateDevices();
+                    statusLabel.textContent = `장치 ${midiRecorder.getInputDevices().length}개 감지됨`;
+                } else {
+                    statusLabel.textContent = 'Web MIDI API 미지원 또는 권한 거부';
+                }
+            }
+        } else {
+            recordPanel.classList.add('hidden');
+        }
+    });
+
+    // 장치 목록 새로고침
+    refreshBtn.addEventListener('click', () => {
+        populateDevices();
+    });
+
+    // BPM 입력값을 bpmChangeInput 기본값과 동기화
+    bpmInput.addEventListener('input', () => {
+        if (!midiRecorder.isRecording) {
+            bpmChangeInput.value = bpmInput.value;
+        }
+    });
+
+    // 녹음 시작
+    startBtn.addEventListener('click', () => {
+        const bpm = parseInt(bpmInput.value, 10) || 120;
+        const lane = laneSelect.value;
+        const deviceId = deviceSelect.value || undefined;
+
+        noteData.bpm = bpm;
+        bpmChangeInput.value = bpm;
+
+        midiRecorder.onBpmDetected = (detectedBpm) => {
+            clockBpmLabel.textContent = `클럭 BPM: ${detectedBpm}`;
+            clockBpmLabel.classList.remove('hidden');
+        };
+
+        midiRecorder.onRecordingTick = (elapsedMs) => {
+            const sec = (elapsedMs / 1000).toFixed(1);
+            statusLabel.textContent = `● 녹음 중… ${sec}s`;
+        };
+
+        midiRecorder.startRecording({
+            bpm,
+            beatsPerBar:  noteData.timeSignature.numerator,
+            slotsPerBeat: noteData.slotsPerBeat,
+            targetLane:   lane,
+            inputDeviceId: deviceId,
+        });
+
+        // UI 상태 전환
+        startBtn.disabled       = true;
+        stopBtn.disabled        = false;
+        bpmChangeBtn.disabled   = false;
+        bpmChangeInput.disabled = false;
+        bpmInput.disabled       = true;
+        laneSelect.disabled     = true;
+        deviceSelect.disabled   = true;
+        statusLabel.textContent = '● 녹음 중…';
+        statusLabel.classList.add('recording');
+        clockBpmLabel.classList.add('hidden');
+
+        document.getElementById('info-bpm').textContent = `BPM: ${bpm}`;
+    });
+
+    // 녹음 종료
+    stopBtn.addEventListener('click', () => {
+        midiRecorder.stopRecording();
+
+        // UI 상태 복원
+        startBtn.disabled       = false;
+        stopBtn.disabled        = true;
+        bpmChangeBtn.disabled   = true;
+        bpmChangeInput.disabled = true;
+        bpmInput.disabled       = false;
+        laneSelect.disabled     = false;
+        deviceSelect.disabled   = false;
+        statusLabel.textContent = '녹음 완료';
+        statusLabel.classList.remove('recording');
+
+        midiParser.showNotification('✅ 녹음 완료');
+    });
+
+    // 녹음 중 BPM 변경 마커 삽입
+    bpmChangeBtn.addEventListener('click', () => {
+        const newBpm = parseInt(bpmChangeInput.value, 10);
+        if (!newBpm || newBpm <= 0) return;
+        midiRecorder.markBpmChange(newBpm);
+        noteData.bpm = newBpm;
+        document.getElementById('info-bpm').textContent = `BPM: ${newBpm}`;
+        midiParser.showNotification(`♩ BPM → ${newBpm}`);
+    });
+
+    // 8. 초기 렌더링
     renderer.updateZoomUI();
     renderer.render();
 

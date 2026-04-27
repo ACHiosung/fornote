@@ -37,8 +37,46 @@
                     <input type="file" id="midi-upload" accept=".mid,.midi">
                 </label>
                 <button id="export-txt-btn" class="btn">TXT 내보내기</button>
+                <button id="midi-record-init-btn" class="btn">🎹 MIDI 녹음</button>
             </div>
         </header>
+
+        <!-- MIDI 녹음 패널 (기본 숨김) -->
+        <div id="record-panel" class="record-panel hidden">
+            <div class="record-panel-inner">
+                <div class="record-row">
+                    <label class="record-label">입력 장치</label>
+                    <select id="record-device-select" class="record-select">
+                        <option value="">-- 장치 선택 --</option>
+                    </select>
+                    <button id="record-refresh-btn" class="btn small-btn" title="장치 목록 새로고침">↺</button>
+                </div>
+                <div class="record-row">
+                    <label class="record-label">레인</label>
+                    <select id="record-lane-select" class="record-select">
+                        <option value="normal_1">일반 1</option>
+                        <option value="normal_2">일반 2</option>
+                        <option value="normal_3">일반 3</option>
+                        <option value="long_1">롱 1</option>
+                        <option value="long_2">롱 2</option>
+                        <option value="long_3">롱 3</option>
+                        <option value="drag_1">드래그 1</option>
+                        <option value="drag_2">드래그 2</option>
+                        <option value="drag_3">드래그 3</option>
+                    </select>
+                    <label class="record-label" style="margin-left:8px;">BPM</label>
+                    <input id="record-bpm-input" type="number" class="record-number-input" value="120" min="10" max="999" step="1">
+                </div>
+                <div class="record-row">
+                    <button id="record-start-btn" class="btn primary-btn">● 녹음 시작</button>
+                    <button id="record-stop-btn" class="btn" disabled>■ 녹음 종료</button>
+                    <button id="record-bpmchange-btn" class="btn" disabled title="현재 시점에 BPM 변경 마커 삽입">♩ BPM 변경</button>
+                    <input id="record-bpmchange-input" type="number" class="record-number-input" value="120" min="10" max="999" step="1" disabled>
+                    <span id="record-status" class="record-status">대기 중</span>
+                    <span id="record-clock-bpm" class="record-clock-bpm hidden"></span>
+                </div>
+            </div>
+        </div>
 
         <div class="main-content">
             <!-- Left Sidebar -->
@@ -94,6 +132,7 @@
 
     <script src="js/note-data.js"></script>
     <script src="js/midi-parser.js"></script>
+    <script src="js/midi-input-recorder.js"></script>
     <script src="js/grid-renderer.js"></script>
     <script src="js/editor.js"></script>
     <script src="js/exporter.js"></script>

@@ -14,6 +14,9 @@ class NoteData {
         // 마디 크기(슬롯 수) 계산
         this.slotsPerMeasure = this.timeSignature.numerator * this.slotsPerBeat;
 
+        // BPM 변화 기록: [{ bar: 0, bpm: 120 }, ...]  (bar는 0-indexed)
+        this.bpmChanges = [];
+
         // 9개 행 초기화
         this.lanes = {
             normal_1: {}, normal_2: {}, normal_3: {},
@@ -32,6 +35,8 @@ class NoteData {
         // slotsPerBeat는 이미 분모(den) 기준이므로, 단순히 분자 × slotsPerBeat
         // 예: 4/4 → 4 * 12 = 48, 6/8 → 6 * 24 = 144, 4/16 → 4 * 48 = 192
         this.slotsPerMeasure = num * slotsPerBeat;
+        // MIDI 파일 로드 시 BPM 변화 기록 초기화 (MIDI 파일 자체에서 재설정됨)
+        this.bpmChanges = [];
         console.log(`Metadata updated: BPM=${this.bpm}, TS=${num}/${den}, slotsPerBeat=${slotsPerBeat}, slotsPerMeasure=${this.slotsPerMeasure}`);
     }
 
@@ -125,14 +130,29 @@ class NoteData {
         this.setSlot('normal_1', measureIndex, slotIndex, '1');
     }
 
-    // 데이터를 Export 포맷 텍스트로 변환
+    // 데이터를 Export 포맷 텍스트로 변환 (txtTojson.cs 호환 형식)
     exportToTXT() {
-        let txt = `[HEADER]
-BPM=${this.bpm}
-TimeSignature=${this.timeSignature.numerator}/${this.timeSignature.denominator}
-SlotsPerBeat=${this.slotsPerBeat}
-TotalMeasures=${this.totalMeasures}
-\n`;
+        let txt = `#BPM ${this.bpm}\n`;
+
+        // BPM 변화 헤더 라인 (#BPMCHANGE 형식)
+        for (const change of this.bpmChanges) {
+            const bar = change.bar.toString().padStart(3, '0');
+            txt += `#BPMCHANGE ${bar} 08 ${change.bpm}\n`;
+        }
+
+        txt += `*---------------------- MAIN DATA FIELD\n`;
+
+        const laneChannelMap = {
+            normal_1: 11,
+            normal_2: 12,
+            normal_3: 13,
+            long_1:   51,
+            long_2:   52,
+            long_3:   53,
+            drag_1:   18,
+            drag_2:   19,
+            drag_3:   20,
+        };
 
         const lanesOrder = [
             'normal_1', 'normal_2', 'normal_3',
@@ -140,58 +160,22 @@ TotalMeasures=${this.totalMeasures}
             'drag_1', 'drag_2', 'drag_3'
         ];
 
-        
         for (const lane of lanesOrder) {
-            txt += `[${lane.toUpperCase()}]\n`;
-            let channel = 0
+            const channel = laneChannelMap[lane];
 
-            switch(lane){
-                case 'normal_1':
-                    channel = 11
-                    break;
-                case 'normal_2':
-                    channel = 12
-                    break;
-                case 'normal_2':
-                    channel = 13
-                    break;
-                case 'long_1':
-                    channel = 51;
-                    break;
-                case 'long_2':
-                    channel = 52;
-                    break;
-                case 'long_3':
-                    channel = 53;
-                    break;
-                case 'drag_1':
-                    channel = 18
-                    break;
-                case 'drag_1':
-                    channel = 19
-                    break;
-                case 'drag_1':
-                    channel = 20
-                    break;
-                default:
-                    channel = 11
-                    break;
-                    
-            }
-            
             for (let m = 1; m <= this.totalMeasures; m++) {
                 let mData = this.getMeasureData(lane, m);
-            
+
                 mData = mData
                     .split('')
                     .map(v => v === '1' ? '01' : '00')
                     .join('');
-            
+
                 if (mData.includes('1')) {
-                    txt += `#${(m-1).toString().padStart(3, '0')}${channel.toString().padStart(2, '0')}:${mData}\n`;
+                    const bar = (m - 1).toString().padStart(3, '0');
+                    txt += `#${bar}${channel.toString().padStart(2, '0')}:${mData}\n`;
                 }
             }
-            txt += "\n";
         }
 
         return txt;
