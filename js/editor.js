@@ -104,12 +104,17 @@ class Editor {
             const laneType = info.laneName.split('_')[0]; // 'normal', 'long', 'drag'
 
             if (laneType === 'normal') {
-                // 일반 노트 → 토글
+                // 일반 노트 → 토글 (0 ↔ 1)
                 let { measureIndex, slotIndex } = this.noteData.getMeasureAndSlotFromAbsolute(info.absSlot);
                 this.noteData.toggleSlot(info.laneName, measureIndex, slotIndex);
                 this.renderer.render();
-            } else if (laneType === 'long' || laneType === 'drag') {
-                // 롱/드래그 노트 → 범위 드래그 시작
+            } else if (laneType === 'drag') {
+                // 드래그 노트 → 토글 (0 ↔ 2), 빨간 단일 노트
+                let { measureIndex, slotIndex } = this.noteData.getMeasureAndSlotFromAbsolute(info.absSlot);
+                this.noteData.toggleDragSlot(info.laneName, measureIndex, slotIndex);
+                this.renderer.render();
+            } else if (laneType === 'long') {
+                // 롱노트 → 범위 드래그 시작
                 this.isDragging = true;
                 this.dragStartAbsSlot = info.absSlot;
                 this.dragStartLaneName = info.laneName;
@@ -132,8 +137,8 @@ class Editor {
             if (this.isDragging) {
                 const dragType = this.dragStartLaneName ? this.dragStartLaneName.split('_')[0] : '';
 
-                // 롱/드래그 노트 범위 드래그
-                if ((dragType === 'long' || dragType === 'drag') && this.dragStartLaneName) {
+                // 롱노트 범위 드래그
+                if (dragType === 'long' && this.dragStartLaneName) {
                     this.noteData.setRange(this.dragStartLaneName, this.dragStartAbsSlot, info.absSlot, '1');
                     this.renderer.render();
                 }

@@ -81,6 +81,17 @@ class NoteData {
         this.lanes[laneName][measureIndex] = chars.join('');
     }
 
+    // 드래그 노트 토글용 (0 <-> 2)
+    toggleDragSlot(laneName, measureIndex, slotIndex) {
+        let measureData = this.getMeasureData(laneName, measureIndex);
+        if (!measureData) return;
+        if (slotIndex < 0 || slotIndex >= this.slotsPerMeasure) return;
+
+        let chars = measureData.split('');
+        chars[slotIndex] = chars[slotIndex] === '2' ? '0' : '2';
+        this.lanes[laneName][measureIndex] = chars.join('');
+    }
+
     // 마디 전체 범위 설정 (1 또는 0으로)
     fillMeasureRange(laneName, measureIndex, startSlot, endSlot, value = "1") {
         let measureData = this.getMeasureData(laneName, measureIndex);
@@ -199,16 +210,21 @@ class NoteData {
 
         for (const lane of lanesOrder) {
             const channel = laneChannelMap[lane];
+            const isDrag = lane.startsWith('drag');
 
             for (let m = 1; m <= this.totalMeasures; m++) {
                 let mData = this.getMeasureData(lane, m);
 
                 mData = mData
                     .split('')
-                    .map(v => v === '1' ? '01' : '00')
+                    .map(v => {
+                        if (v === '1') return '01';
+                        if (isDrag && v === '2') return '02';
+                        return '00';
+                    })
                     .join('');
 
-                if (mData.includes('1')) {
+                if (mData.includes('1') || mData.includes('2')) {
                     const bar = (m - 1).toString().padStart(3, '0');
                     txt += `#${bar}${channel.toString().padStart(2, '0')}:${mData}\n`;
                 }

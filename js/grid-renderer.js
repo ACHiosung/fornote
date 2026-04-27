@@ -298,14 +298,30 @@ class GridRenderer {
                 if (!mData) continue; // 이 마디에 저장된 데이터 없음 → 스킵
 
                 for (let s = 0; s < mData.length; s++) {
-                    if (mData[s] !== '1') {
-                        // 롱/드래그 연속이 끊기는 지점 처리
-                        if (isHolding && (type === 'long' || type === 'drag')) {
+                    const v = mData[s];
+
+                    // ── 드래그 노트: 단일 빨간 타일 (값 '2', 하위호환 '1') ──
+                    if (type === 'drag') {
+                        if (v === '2' || v === '1') {
+                            const noteY = this.getY(m, s);
+                            if (noteY >= -30 && noteY <= this.height + 30) {
+                                ctx.fillStyle = "#ff2222";
+                                const ch = Math.max(6, this.slotHeight * 0.4);
+                                ctx.fillRect(laneX + 3, noteY - ch / 2, this.laneWidth - 6, ch);
+                                drawnCount++;
+                            }
+                        }
+                        continue;
+                    }
+
+                    if (v !== '1') {
+                        // 롱노트 연속이 끊기는 지점 처리
+                        if (isHolding && type === 'long') {
                             // 이전 슬롯이 끝이었음 → 바 그리기
                             const prevY = this.getY(m, s);
                             const topY = Math.min(holdStartY, prevY);
                             const h = Math.abs(holdStartY - prevY);
-                            ctx.fillStyle = type === 'long' ? "rgba(0,230,118,0.7)" : "rgba(255,145,0,0.6)";
+                            ctx.fillStyle = "rgba(0,230,118,0.7)";
                             ctx.fillRect(laneX + 5, topY, this.laneWidth - 10, Math.max(h, 4));
                             isHolding = false;
                             drawnCount++;
@@ -313,7 +329,7 @@ class GridRenderer {
                         continue;
                     }
 
-                    // mData[s] === '1' 인 경우
+                    // v === '1' 인 경우
                     const noteY = this.getY(m, s);
 
                     if (type === 'normal') {
@@ -324,7 +340,7 @@ class GridRenderer {
                             ctx.fillRect(laneX + 3, noteY - ch / 2, this.laneWidth - 6, ch);
                             drawnCount++;
                         }
-                    } else if (type === 'long' || type === 'drag') {
+                    } else if (type === 'long') {
                         if (!isHolding) {
                             isHolding = true;
                             holdStartY = noteY;
@@ -340,7 +356,7 @@ class GridRenderer {
                         if (!nextIs1 && isHolding) {
                             const topY = Math.min(holdStartY, noteY);
                             const h = Math.abs(holdStartY - noteY);
-                            ctx.fillStyle = type === 'long' ? "rgba(0,230,118,0.7)" : "rgba(255,145,0,0.6)";
+                            ctx.fillStyle = "rgba(0,230,118,0.7)";
                             ctx.fillRect(laneX + 5, topY, this.laneWidth - 10, Math.max(h, 4));
                             isHolding = false;
                             drawnCount++;
@@ -356,7 +372,7 @@ class GridRenderer {
             if (lane === 'bpm_change' || lane === 'ts_change') continue;
             for (let m = 1; m <= this.noteData.totalMeasures; m++) {
                 const d = this.noteData.lanes[lane][m];
-                if (d) totalNotes += (d.match(/1/g) || []).length;
+                if (d) totalNotes += (d.match(/[12]/g) || []).length;
             }
         }
         const bpmChangeCount = this.noteData.bpmChanges.length;
