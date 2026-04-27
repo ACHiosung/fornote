@@ -175,6 +175,31 @@ class MidiParser {
             }
             console.log(`[MidiParser] 완료: ${noteCount}개 배치, ${skippedCount}개 범위 초과 스킵`);
 
+            // ========== 4. BPM 변화 이벤트 추출 (tick → 슬롯 변환) ==========
+            const bpmChangeList = [];
+            if (midi.header && midi.header.tempos) {
+                midi.header.tempos.forEach((tempo) => {
+                    // tick=0 이하는 초기 BPM으로 이미 처리됨 → 스킵
+                    if (tempo.ticks <= 0) return;
+
+                    const rawSlot = tempo.ticks / ticksPerSlot;
+                    const absSlot = Math.round(rawSlot);
+                    const { measureIndex, slotIndex } = this.noteData.getMeasureAndSlotFromAbsolute(absSlot);
+
+                    if (measureIndex <= this.noteData.totalMeasures) {
+                        bpmChangeList.push({
+                            measureIndex,
+                            slotIndex,
+                            bpm: Math.round(tempo.bpm),
+                        });
+                    }
+                });
+            }
+            this.noteData.bpmChanges = bpmChangeList;
+            if (bpmChangeList.length > 0) {
+                console.log(`[MidiParser] BPM 변화 ${bpmChangeList.length}개 추출:`, bpmChangeList);
+            }
+
             // ========== 4. 첫 노트 마디 찾기 & 자동 스크롤 ==========
             let firstMeasureWithNote = -1;
             for (let m = 1; m <= this.noteData.totalMeasures; m++) {
@@ -188,7 +213,8 @@ class MidiParser {
                 this.showNotification('⚠️ MIDI 파일에서 노트를 찾을 수 없습니다.', true);
                 this.renderer.render();
             } else {
-                this.showNotification(`✅ BPM=${bpm}, ${tsNum}/${tsDen}박, slotsPerBeat=${slotsPerBeat}, ${totalMeasures}마디, ${noteCount}개 노트 로드`);
+                const bpmMsg = bpmChangeList.length > 0 ? `, BPM변화 ${bpmChangeList.length}회` : '';
+                this.showNotification(`✅ BPM=${bpm}, ${tsNum}/${tsDen}박, slotsPerBeat=${slotsPerBeat}, ${totalMeasures}마디, ${noteCount}개 노트 로드${bpmMsg}`);
                 if (firstMeasureWithNote > 0) {
                     this.renderer.scrollToMeasure(firstMeasureWithNote);
                 } else {

@@ -308,13 +308,14 @@ class MidiInputRecorder {
 
         console.log(`[MidiInputRecorder] 변환 완료: ${placedCount}개 노트 배치`);
 
-        // BPM 변화 정보를 noteData에 저장 (bar 0-indexed)
+        // BPM 변화 정보를 noteData에 저장 (measureIndex는 1-indexed, 슬롯 단위 정밀도 유지)
         this.noteData.bpmChanges = this.bpmSnapshots
             .filter(snap => snap.timeMs > 0) // 초기 BPM은 #BPM 헤더로 처리
-            .map(snap => ({
-                bar: this._timeMsToBarIndex(snap.timeMs),
-                bpm: snap.bpm,
-            }));
+            .map(snap => {
+                const absSlot = this._timeMsToAbsSlot(snap.timeMs);
+                const { measureIndex, slotIndex } = this.noteData.getMeasureAndSlotFromAbsolute(absSlot);
+                return { measureIndex, slotIndex, bpm: snap.bpm };
+            });
 
         if (this.renderer) {
             this.renderer.render();

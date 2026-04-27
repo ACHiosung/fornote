@@ -15,7 +15,8 @@ class GridRenderer {
         this.laneNames = [
             'normal_1', 'normal_2', 'normal_3',
             'long_1', 'long_2', 'long_3',
-            'drag_1', 'drag_2', 'drag_3'
+            'drag_1', 'drag_2', 'drag_3',
+            'bpm_change',
         ];
         this.laneWidth = 60;
         this.measureLabelWidth = 60;
@@ -194,7 +195,7 @@ class GridRenderer {
         // ===== 2. 세로선 (Lane 구분) =====
         for (let i = 0; i <= this.laneNames.length; i++) {
             const x = gridStartX + i * this.laneWidth;
-            if (i === 0 || i === 3 || i === 6 || i === 9) {
+            if (i === 0 || i === 3 || i === 6 || i === 9 || i === 10) {
                 ctx.lineWidth = 2; ctx.strokeStyle = "rgba(255,255,255,0.4)";
             } else {
                 ctx.lineWidth = 1; ctx.strokeStyle = "rgba(255,255,255,0.15)";
@@ -206,11 +207,20 @@ class GridRenderer {
                 ctx.font = "10px sans-serif";
                 ctx.textAlign = "center";
                 const name = this.laneNames[i];
-                const disp = name.startsWith("n") ? "Nml " + name.split('_')[1] :
-                             name.startsWith("l") ? "Lng " + name.split('_')[1] :
+                const disp = name === 'bpm_change'  ? 'BPM' :
+                             name.startsWith("n")   ? "Nml " + name.split('_')[1] :
+                             name.startsWith("l")   ? "Lng " + name.split('_')[1] :
                              "Drg " + name.split('_')[1];
                 ctx.fillText(disp, x + this.laneWidth / 2, 15);
             }
+        }
+
+        // BPM 레인 배경 tint
+        const bpmLaneIdx = this.laneNames.indexOf('bpm_change');
+        if (bpmLaneIdx >= 0) {
+            const bpmX = gridStartX + bpmLaneIdx * this.laneWidth;
+            ctx.fillStyle = "rgba(100, 220, 255, 0.04)";
+            ctx.fillRect(bpmX, 0, this.laneWidth, this.height);
         }
 
         // ===== 3. 노트 렌더링 =====
@@ -219,8 +229,33 @@ class GridRenderer {
         for (let l = 0; l < this.laneNames.length; l++) {
             const laneName = this.laneNames[l];
             const laneX = gridStartX + l * this.laneWidth;
-            const type = laneName.split('_')[0];
 
+            // ── BPM 변화 레인 (특수 렌더링, 읽기 전용) ──
+            if (laneName === 'bpm_change') {
+                for (const change of this.noteData.bpmChanges) {
+                    const noteY = this.getY(change.measureIndex, change.slotIndex);
+                    if (noteY < -20 || noteY > this.height + 20) continue;
+
+                    const ch = Math.max(4, Math.min(16, this.slotHeight * 0.6));
+
+                    // 마커 바
+                    ctx.fillStyle = "rgba(80, 200, 255, 0.85)";
+                    ctx.fillRect(laneX + 2, noteY - ch / 2, this.laneWidth - 4, ch);
+
+                    // BPM 수치 텍스트
+                    if (ch >= 6) {
+                        const fontSize = Math.min(ch - 1, 11);
+                        ctx.fillStyle = "#000";
+                        ctx.font = `bold ${fontSize}px monospace`;
+                        ctx.textAlign = "center";
+                        ctx.fillText(`${change.bpm}`, laneX + this.laneWidth / 2, noteY + fontSize / 2 - 1);
+                    }
+                    drawnCount++;
+                }
+                continue;
+            }
+
+            const type = laneName.split('_')[0];
             let isHolding = false;
             let holdStartY = 0;
 
@@ -285,14 +320,16 @@ class GridRenderer {
         // ===== 4. 디버그 정보 표시 =====
         let totalNotes = 0;
         for (const lane of this.laneNames) {
+            if (lane === 'bpm_change') continue;
             for (let m = 1; m <= this.noteData.totalMeasures; m++) {
                 const d = this.noteData.lanes[lane][m];
                 if (d) totalNotes += (d.match(/1/g) || []).length;
             }
         }
+        const bpmChangeCount = this.noteData.bpmChanges.length;
         ctx.fillStyle = "#fff";
         ctx.font = "12px monospace";
         ctx.textAlign = "left";
-        ctx.fillText(`Data: ${totalNotes} notes | Drawn: ${drawnCount} | Scroll: ${Math.round(this.scrollY)}`, 10, this.height - 8);
+        ctx.fillText(`Data: ${totalNotes} notes | BPM changes: ${bpmChangeCount} | Drawn: ${drawnCount} | Scroll: ${Math.round(this.scrollY)}`, 10, this.height - 8);
     }
 }

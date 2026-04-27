@@ -14,7 +14,7 @@ class NoteData {
         // 마디 크기(슬롯 수) 계산
         this.slotsPerMeasure = this.timeSignature.numerator * this.slotsPerBeat;
 
-        // BPM 변화 기록: [{ bar: 0, bpm: 120 }, ...]  (bar는 0-indexed)
+        // BPM 변화 기록: [{ measureIndex, slotIndex, bpm }, ...]  (measureIndex는 1-indexed)
         this.bpmChanges = [];
 
         // 9개 행 초기화
@@ -119,6 +119,7 @@ class NoteData {
         for (let lane in this.lanes) {
             this.lanes[lane] = {};
         }
+        this.bpmChanges = [];
     }
 
     // MIDI에서 추출된 노트를 Normal 1에만 추가합니다.
@@ -134,9 +135,9 @@ class NoteData {
     exportToTXT() {
         let txt = `#BPM ${this.bpm}\n`;
 
-        // BPM 변화 헤더 라인 (#BPMCHANGE 형식)
+        // BPM 변화 헤더 라인 (#BPMCHANGE 형식) – measureIndex는 1-indexed
         for (const change of this.bpmChanges) {
-            const bar = change.bar.toString().padStart(3, '0');
+            const bar = (change.measureIndex - 1).toString().padStart(3, '0');
             txt += `#BPMCHANGE ${bar} 08 ${change.bpm}\n`;
         }
 

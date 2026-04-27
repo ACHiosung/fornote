@@ -71,6 +71,9 @@ class Editor {
             const info = this.getSlotInfoFromEvent(e);
             if (!info.laneName) return;
 
+            // BPM 변화 레인은 읽기 전용 – 편집 불가
+            if (info.laneName === 'bpm_change') return;
+
             // 지우개 모드
             if (this.currentMode === 'delete') {
                 let { measureIndex, slotIndex } = this.noteData.getMeasureAndSlotFromAbsolute(info.absSlot);
