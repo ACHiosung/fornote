@@ -21,16 +21,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // 3. Lane 선택 버튼
-    const laneBtns = document.querySelectorAll('.lane-btn');
-    laneBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            laneBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            editor.setLane(parseInt(btn.dataset.lane));
-        });
-    });
-
     // 4. MIDI 파일 업로드
     document.getElementById('midi-upload').addEventListener('change', (e) => {
         const file = e.target.files[0];

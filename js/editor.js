@@ -10,7 +10,6 @@ class Editor {
 
         // 상태 변수
         this.currentMode = 'normal';   // normal, long, drag, delete
-        this.currentLaneIndex = 1;     // 1, 2, 3
 
         this.isDragging = false;
         this.dragStartAbsSlot = -1;
@@ -23,16 +22,14 @@ class Editor {
         this.currentMode = mode;
     }
 
-    setLane(laneIdx) {
-        this.currentLaneIndex = laneIdx;
-    }
-
     // 클릭 위치에서 편집 대상 laneName을 결정
-    // 모드와 레인 번호 조합으로 결정 (예: long 모드 + lane 2 = 'long_2')
-    getTargetLaneName() {
-        if (this.currentMode === 'normal') return 'normal_' + this.currentLaneIndex;
-        if (this.currentMode === 'long') return 'long_' + this.currentLaneIndex;
-        if (this.currentMode === 'drag') return 'drag_' + this.currentLaneIndex;
+    // 모드와 마우스 X 위치의 레인 인덱스 조합으로 결정 (예: long 모드 + laneIdx 4 = 'long_2')
+    getTargetLaneName(laneIdx) {
+        if (laneIdx < 0 || laneIdx >= 9) return null;
+        const laneNum = (laneIdx % 3) + 1;
+        if (this.currentMode === 'normal') return 'normal_' + laneNum;
+        if (this.currentMode === 'long') return 'long_' + laneNum;
+        if (this.currentMode === 'drag') return 'drag_' + laneNum;
         return null; // delete 모드는 클릭한 레인에서 직접 결정
     }
 
@@ -115,7 +112,7 @@ class Editor {
             }
 
             // 모드에 맞는 레인 결정
-            const targetLane = this.getTargetLaneName();
+            const targetLane = this.getTargetLaneName(info.laneIdx);
             if (!targetLane) return;
 
             // 일반노트 모드 → 토글
