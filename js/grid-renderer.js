@@ -353,7 +353,7 @@ class GridRenderer {
         // ===== 4. 디버그 정보 표시 =====
         let totalNotes = 0;
         for (const lane of this.laneNames) {
-            if (lane === 'bpm_change') continue;
+            if (lane === 'bpm_change' || lane === 'ts_change') continue;
             for (let m = 1; m <= this.noteData.totalMeasures; m++) {
                 const d = this.noteData.lanes[lane][m];
                 if (d) totalNotes += (d.match(/1/g) || []).length;
