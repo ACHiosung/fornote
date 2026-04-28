@@ -145,6 +145,8 @@ class GridRenderer {
         const spb = this.noteData.slotsPerBeat;
         const sixteenthInterval = spb / 4;   // 16분음표 간격 (spb/4)
         const tripletInterval = spb / 3;     // 셋잇단음표 간격 (spb/3)
+        const use16th = sixteenthInterval >= 1 && Number.isInteger(sixteenthInterval);
+        const useTriplet = tripletInterval >= 1 && Number.isInteger(tripletInterval);
 
         ctx.lineWidth = 1;
         for (let m = 1; m <= this.noteData.totalMeasures; m++) {
@@ -153,9 +155,9 @@ class GridRenderer {
                 if (y < -50 || y > this.height + 50) continue;
 
                 const isMeasureLine = (s === 0);
-                const isBeatLine = (!isMeasureLine && s % spb === 0);
-                const is16th = (s % sixteenthInterval === 0);
-                const isTriplet = (s % tripletInterval === 0);
+                const isBeatLine = (!isMeasureLine && spb >= 1 && s % spb === 0);
+                const is16th = use16th && (s % sixteenthInterval === 0);
+                const isTriplet = useTriplet && (s % tripletInterval === 0);
 
                 if (isMeasureLine) {
                     // ── 마디선 (굵은 흰색) ──

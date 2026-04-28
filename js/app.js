@@ -192,7 +192,34 @@ document.addEventListener('DOMContentLoaded', () => {
         midiParser.showNotification(`♩ BPM → ${newBpm}`);
     });
 
-    // 8. 초기 렌더링
+    // 8. 그리드 분할 수 조절
+    function applyGrid(value) {
+        const val = Math.max(1, Math.min(192, parseInt(value, 10)));
+        if (isNaN(val)) return;
+        noteData.slotsPerMeasure = val;
+        noteData.slotsPerBeat = Math.max(1, Math.floor(val / noteData.timeSignature.numerator));
+
+        // 입력 필드 & 프리셋 버튼 동기화
+        const gridInput = document.getElementById('grid-input');
+        if (gridInput) gridInput.value = val;
+        document.querySelectorAll('.grid-preset-btn').forEach(btn => {
+            btn.classList.toggle('active', parseInt(btn.dataset.grid, 10) === val);
+        });
+
+        renderer.render();
+    }
+
+    const gridInput = document.getElementById('grid-input');
+    if (gridInput) {
+        gridInput.addEventListener('change', (e) => applyGrid(e.target.value));
+        gridInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') applyGrid(e.target.value); });
+    }
+
+    document.querySelectorAll('.grid-preset-btn').forEach(btn => {
+        btn.addEventListener('click', () => applyGrid(btn.dataset.grid));
+    });
+
+    // 9. 초기 렌더링
     renderer.updateZoomUI();
     renderer.render();
 
