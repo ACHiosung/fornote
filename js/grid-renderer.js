@@ -25,6 +25,9 @@ class GridRenderer {
         this.slotHeight = 30;
         this.scrollY = 0;
 
+        // Grid 스냅: 1마디를 몇 등분으로 나눠서 클릭을 스냅할지 (UI 전용, 저장 해상도와 무관)
+        this.gridDivisions = 24;
+
         this.init();
     }
 
@@ -109,7 +112,13 @@ class GridRenderer {
 
     getSlotFromY(y) {
         const absoluteY = this.height - y + this.scrollY;
-        let absSlot = Math.round(absoluteY / this.slotHeight);
+        const rawAbsSlot = absoluteY / this.slotHeight;
+
+        // 스냅 간격 = slotsPerMeasure / gridDivisions
+        // 클릭 위치를 가장 가까운 그리드 슬롯으로 스냅
+        const spm = this.noteData.slotsPerMeasure;
+        const snapInterval = Math.max(1, Math.floor(spm / this.gridDivisions));
+        let absSlot = Math.round(rawAbsSlot / snapInterval) * snapInterval;
         if (absSlot < 0) absSlot = 0;
         return absSlot;
     }
@@ -148,14 +157,19 @@ class GridRenderer {
         const use16th = sixteenthInterval >= 1 && Number.isInteger(sixteenthInterval);
         const useTriplet = tripletInterval >= 1 && Number.isInteger(tripletInterval);
 
+        // 현재 그리드 설정의 스냅 간격 (사용자 지정 분할선 표시용)
+        const spm = this.noteData.slotsPerMeasure;
+        const snapInterval = Math.max(1, Math.floor(spm / this.gridDivisions));
+
         ctx.lineWidth = 1;
         for (let m = 1; m <= this.noteData.totalMeasures; m++) {
-            for (let s = 0; s < this.noteData.slotsPerMeasure; s++) {
+            for (let s = 0; s < spm; s++) {
                 const y = this.getY(m, s);
                 if (y < -50 || y > this.height + 50) continue;
 
                 const isMeasureLine = (s === 0);
                 const isBeatLine = (!isMeasureLine && spb >= 1 && s % spb === 0);
+                const isGridSnap = !isMeasureLine && !isBeatLine && (s % snapInterval === 0);
                 const is16th = use16th && (s % sixteenthInterval === 0);
                 const isTriplet = useTriplet && (s % tripletInterval === 0);
 
@@ -175,6 +189,11 @@ class GridRenderer {
                     ctx.lineWidth = 1.5;
                     ctx.beginPath(); ctx.moveTo(gridStartX, y); ctx.lineTo(gridEndX, y); ctx.stroke();
                     ctx.lineWidth = 1;
+                } else if (isGridSnap) {
+                    // ── 현재 그리드 분할선 (밝은 청록색) ──
+                    ctx.strokeStyle = "rgba(80,220,200,0.35)";
+                    ctx.lineWidth = 1;
+                    ctx.beginPath(); ctx.moveTo(gridStartX, y); ctx.lineTo(gridEndX, y); ctx.stroke();
                 } else if (is16th && isTriplet) {
                     // ── 16분음표와 셋잇단이 겹치는 위치 ──
                     ctx.strokeStyle = "rgba(255,255,255,0.15)";

@@ -196,8 +196,9 @@ document.addEventListener('DOMContentLoaded', () => {
     function applyGrid(value) {
         const val = Math.max(1, Math.min(192, parseInt(value, 10)));
         if (isNaN(val)) return;
-        noteData.slotsPerMeasure = val;
-        noteData.slotsPerBeat = Math.max(1, Math.floor(val / noteData.timeSignature.numerator));
+
+        // Grid는 클릭 스냅 간격에만 영향 — 내부 저장 해상도(slotsPerMeasure)는 변경하지 않음
+        renderer.gridDivisions = val;
 
         // 입력 필드 & 프리셋 버튼 동기화
         const gridInput = document.getElementById('grid-input');
