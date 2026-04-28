@@ -21,8 +21,8 @@ class GridRenderer {
         ];
         this.laneWidth = 60;
         this.measureLabelWidth = 60;
-        this.defaultSlotHeight = 30;
-        this.slotHeight = 30;
+        this.defaultMeasureHeight = 480; // 기본 마디당 픽셀 높이 (30px × 16분 기준)
+        this.measureHeight = 480;        // 마디당 픽셀 높이 (zoom의 primary 값)
         this.scrollY = 0;
 
         this.init();
@@ -48,34 +48,43 @@ class GridRenderer {
         this.render();
     }
 
+    // slotHeight는 measureHeight / spm으로 자동 계산 (spm 변화에 무관하게 마디 높이 일정)
+    get slotHeight() {
+        const spm = this.noteData.slotsPerMeasure;
+        return spm > 0 ? this.measureHeight / spm : this.measureHeight;
+    }
+
     setZoom(delta) {
-        this.slotHeight += delta;
-        if (this.slotHeight < 1) this.slotHeight = 1;
-        if (this.slotHeight > 120) this.slotHeight = 120;
+        // delta는 슬롯 단위 (4px)이지만, measureHeight 단위로 환산 (기본 슬롯 16개 기준)
+        const step = delta * (this.defaultMeasureHeight / 30); // 30px = 기본 slotHeight
+        this.measureHeight += step;
+        if (this.measureHeight < 20) this.measureHeight = 20;
+        if (this.measureHeight > 60000) this.measureHeight = 60000;
         this.updateZoomUI();
         this.render();
     }
 
     setSlotHeight(h) {
-        this.slotHeight = h;
-        if (this.slotHeight < 1) this.slotHeight = 1;
-        if (this.slotHeight > 120) this.slotHeight = 120;
+        // 외부 호환용 — slotHeight 단위를 measureHeight로 환산
+        this.measureHeight = h * this.noteData.slotsPerMeasure;
+        if (this.measureHeight < 20) this.measureHeight = 20;
+        if (this.measureHeight > 60000) this.measureHeight = 60000;
         this.updateZoomUI();
         this.render();
     }
 
     // 전체 마디를 화면에 맞추기
     zoomFit() {
-        const totalSlots = this.noteData.totalMeasures * this.noteData.slotsPerMeasure;
-        if (totalSlots <= 0) return;
-        this.slotHeight = Math.max(1, this.height / totalSlots);
+        const totalMeasures = this.noteData.totalMeasures;
+        if (totalMeasures <= 0) return;
+        this.measureHeight = Math.max(20, this.height / totalMeasures);
         this.scrollY = 0;
         this.updateZoomUI();
         this.render();
     }
 
     getZoomPercent() {
-        return Math.round((this.slotHeight / this.defaultSlotHeight) * 100);
+        return Math.round((this.measureHeight / this.defaultMeasureHeight) * 100);
     }
 
     updateZoomUI() {
@@ -86,7 +95,7 @@ class GridRenderer {
     scroll(delta) {
         this.scrollY += delta;
         if (this.scrollY < 0) this.scrollY = 0;
-        const totalHeight = this.noteData.totalMeasures * this.noteData.slotsPerMeasure * this.slotHeight;
+        const totalHeight = this.noteData.totalMeasures * this.measureHeight;
         if (this.scrollY > totalHeight) this.scrollY = totalHeight;
         this.render();
     }
@@ -109,7 +118,13 @@ class GridRenderer {
 
     getSlotFromY(y) {
         const absoluteY = this.height - y + this.scrollY;
-        let absSlot = Math.round(absoluteY / this.slotHeight);
+        const rawAbsSlot = absoluteY / this.slotHeight;
+
+        // 스냅 간격 = slotsPerMeasure / activeGrid
+        const spm = this.noteData.slotsPerMeasure;
+        const grid = this.noteData.activeGrid || spm;
+        const snapInterval = Math.max(1, Math.round(spm / grid));
+        let absSlot = Math.round(rawAbsSlot / snapInterval) * snapInterval;
         if (absSlot < 0) absSlot = 0;
         return absSlot;
     }
@@ -138,24 +153,22 @@ class GridRenderer {
         const gridEndX = gridStartX + (this.laneNames.length * this.laneWidth);
 
         // ===== 1. 그리드 가로선 =====
-        // slotsPerBeat = LCM(분모, 3) → 동적 계산
-        //   분모4 → spb=12:  16분음표=3슬롯, 셋잇단=4슬롯
-        //   분모8 → spb=24:  16분음표=6슬롯, 셋잇단=8슬롯
-        //   분모16→ spb=48:  16분음표=12슬롯, 셋잇단=16슬롯
-        const spb = this.noteData.slotsPerBeat;
-        const sixteenthInterval = spb / 4;   // 16분음표 간격 (spb/4)
-        const tripletInterval = spb / 3;     // 셋잇단음표 간격 (spb/3)
+        const spm = this.noteData.slotsPerMeasure;
+        const spb = this.noteData.slotsPerBeat;  // 1박당 슬롯 (박 선 표시용)
+
+        // 활성 그리드 스냅 간격 (분할선 표시용)
+        const grid = this.noteData.activeGrid || spm;
+        const snapInterval = Math.max(1, Math.round(spm / grid));
 
         ctx.lineWidth = 1;
         for (let m = 1; m <= this.noteData.totalMeasures; m++) {
-            for (let s = 0; s < this.noteData.slotsPerMeasure; s++) {
+            for (let s = 0; s < spm; s++) {
                 const y = this.getY(m, s);
                 if (y < -50 || y > this.height + 50) continue;
 
                 const isMeasureLine = (s === 0);
-                const isBeatLine = (!isMeasureLine && s % spb === 0);
-                const is16th = (s % sixteenthInterval === 0);
-                const isTriplet = (s % tripletInterval === 0);
+                const isBeatLine = (!isMeasureLine && spb >= 1 && s % spb === 0);
+                const isGridSnap = !isMeasureLine && !isBeatLine && (s % snapInterval === 0);
 
                 if (isMeasureLine) {
                     // ── 마디선 (굵은 흰색) ──
@@ -173,20 +186,12 @@ class GridRenderer {
                     ctx.lineWidth = 1.5;
                     ctx.beginPath(); ctx.moveTo(gridStartX, y); ctx.lineTo(gridEndX, y); ctx.stroke();
                     ctx.lineWidth = 1;
-                } else if (is16th && isTriplet) {
-                    // ── 16분음표와 셋잇단이 겹치는 위치 ──
-                    ctx.strokeStyle = "rgba(255,255,255,0.15)";
-                    ctx.beginPath(); ctx.moveTo(gridStartX, y); ctx.lineTo(gridEndX, y); ctx.stroke();
-                } else if (is16th) {
-                    // ── 16분음표 선 (파란 계열) ──
-                    ctx.strokeStyle = "rgba(130,180,255,0.15)";
-                    ctx.beginPath(); ctx.moveTo(gridStartX, y); ctx.lineTo(gridEndX, y); ctx.stroke();
-                } else if (isTriplet) {
-                    // ── 셋잇단음표 선 (노란 계열) ──
-                    ctx.strokeStyle = "rgba(255,200,80,0.15)";
+                } else if (isGridSnap) {
+                    // ── 현재 그리드 스냅 분할선 (청록색) ──
+                    ctx.strokeStyle = "rgba(80,220,200,0.35)";
                     ctx.beginPath(); ctx.moveTo(gridStartX, y); ctx.lineTo(gridEndX, y); ctx.stroke();
                 } else {
-                    // ── 기타 세분 슬롯 ──
+                    // ── 비스냅 슬롯 (다른 그리드로 배치된 노트 위치 등) ──
                     ctx.strokeStyle = "rgba(255,255,255,0.03)";
                     ctx.beginPath(); ctx.moveTo(gridStartX, y); ctx.lineTo(gridEndX, y); ctx.stroke();
                 }
@@ -298,14 +303,30 @@ class GridRenderer {
                 if (!mData) continue; // 이 마디에 저장된 데이터 없음 → 스킵
 
                 for (let s = 0; s < mData.length; s++) {
-                    if (mData[s] !== '1') {
-                        // 롱/드래그 연속이 끊기는 지점 처리
-                        if (isHolding && (type === 'long' || type === 'drag')) {
+                    const v = mData[s];
+
+                    // ── 드래그 노트: 단일 타일 (값 '1' → 노란색, '2' → 빨간색) ──
+                    if (type === 'drag') {
+                        if (v === '1' || v === '2') {
+                            const noteY = this.getY(m, s);
+                            if (noteY >= -30 && noteY <= this.height + 30) {
+                                ctx.fillStyle = v === '2' ? "#ff2222" : "#ffcc00";
+                                const ch = Math.max(6, this.slotHeight * 0.4);
+                                ctx.fillRect(laneX + 3, noteY - ch / 2, this.laneWidth - 6, ch);
+                                drawnCount++;
+                            }
+                        }
+                        continue;
+                    }
+
+                    if (v !== '1') {
+                        // 롱노트 연속이 끊기는 지점 처리
+                        if (isHolding && type === 'long') {
                             // 이전 슬롯이 끝이었음 → 바 그리기
                             const prevY = this.getY(m, s);
                             const topY = Math.min(holdStartY, prevY);
                             const h = Math.abs(holdStartY - prevY);
-                            ctx.fillStyle = type === 'long' ? "rgba(0,230,118,0.7)" : "rgba(255,145,0,0.6)";
+                            ctx.fillStyle = "rgba(0,230,118,0.7)";
                             ctx.fillRect(laneX + 5, topY, this.laneWidth - 10, Math.max(h, 4));
                             isHolding = false;
                             drawnCount++;
@@ -313,7 +334,7 @@ class GridRenderer {
                         continue;
                     }
 
-                    // mData[s] === '1' 인 경우
+                    // v === '1' 인 경우
                     const noteY = this.getY(m, s);
 
                     if (type === 'normal') {
@@ -324,7 +345,7 @@ class GridRenderer {
                             ctx.fillRect(laneX + 3, noteY - ch / 2, this.laneWidth - 6, ch);
                             drawnCount++;
                         }
-                    } else if (type === 'long' || type === 'drag') {
+                    } else if (type === 'long') {
                         if (!isHolding) {
                             isHolding = true;
                             holdStartY = noteY;
@@ -340,7 +361,7 @@ class GridRenderer {
                         if (!nextIs1 && isHolding) {
                             const topY = Math.min(holdStartY, noteY);
                             const h = Math.abs(holdStartY - noteY);
-                            ctx.fillStyle = type === 'long' ? "rgba(0,230,118,0.7)" : "rgba(255,145,0,0.6)";
+                            ctx.fillStyle = "rgba(0,230,118,0.7)";
                             ctx.fillRect(laneX + 5, topY, this.laneWidth - 10, Math.max(h, 4));
                             isHolding = false;
                             drawnCount++;
@@ -356,7 +377,7 @@ class GridRenderer {
             if (lane === 'bpm_change' || lane === 'ts_change') continue;
             for (let m = 1; m <= this.noteData.totalMeasures; m++) {
                 const d = this.noteData.lanes[lane][m];
-                if (d) totalNotes += (d.match(/1/g) || []).length;
+                if (d) totalNotes += (d.match(/[12]/g) || []).length;
             }
         }
         const bpmChangeCount = this.noteData.bpmChanges.length;

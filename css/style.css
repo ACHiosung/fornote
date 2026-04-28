@@ -340,3 +340,63 @@ canvas {
     0%, 100% { opacity: 1; }
     50%       { opacity: 0.3; }
 }
+
+/* Grid Controls */
+.grid-input-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.grid-number-input {
+    background-color: #2a2a4a;
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-family: inherit;
+    font-size: 0.85rem;
+    width: 64px;
+    text-align: center;
+}
+
+.grid-number-input:focus {
+    outline: none;
+    border-color: var(--accent-hover);
+}
+
+.grid-unit {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+}
+
+.grid-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.grid-preset-btn {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    border-radius: 4px;
+    padding: 3px 6px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.15s;
+    min-width: 28px;
+    text-align: center;
+}
+
+.grid-preset-btn:hover {
+    background: rgba(255,255,255,0.08);
+    color: var(--text-primary);
+}
+
+.grid-preset-btn.active {
+    background: var(--accent-color);
+    border-color: var(--accent-hover);
+    color: var(--text-primary);
+}

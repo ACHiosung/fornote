@@ -21,16 +21,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // 3. Lane 선택 버튼
-    const laneBtns = document.querySelectorAll('.lane-btn');
-    laneBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            laneBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            editor.setLane(parseInt(btn.dataset.lane));
-        });
-    });
-
     // 4. MIDI 파일 업로드
     document.getElementById('midi-upload').addEventListener('change', (e) => {
         const file = e.target.files[0];
@@ -202,7 +192,38 @@ document.addEventListener('DOMContentLoaded', () => {
         midiParser.showNotification(`♩ BPM → ${newBpm}`);
     });
 
-    // 8. 초기 렌더링
+    // 8. 그리드 분할 수 조절 (activeGrid = n, slotsPerMeasure = LCM 누적, 노트 위치 불변)
+    function syncGridUI() {
+        const active = noteData.activeGrid;
+        const gridInput = document.getElementById('grid-input');
+        if (gridInput) gridInput.value = active;
+        document.querySelectorAll('.grid-preset-btn').forEach(btn => {
+            btn.classList.toggle('active', parseInt(btn.dataset.grid, 10) === active);
+        });
+    }
+
+    function applyGrid(value) {
+        const val = Math.max(1, Math.min(192, parseInt(value, 10)));
+        if (isNaN(val)) return;
+        noteData.setGrid(val);
+        syncGridUI();
+        renderer.render();
+    }
+
+    const gridInput = document.getElementById('grid-input');
+    if (gridInput) {
+        gridInput.addEventListener('change', (e) => applyGrid(e.target.value));
+        gridInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') applyGrid(e.target.value); });
+    }
+
+    document.querySelectorAll('.grid-preset-btn').forEach(btn => {
+        btn.addEventListener('click', () => applyGrid(btn.dataset.grid));
+    });
+
+    // 초기 UI 동기화 (기본값 16)
+    syncGridUI();
+
+    // 9. 초기 렌더링
     renderer.updateZoomUI();
     renderer.render();
 
