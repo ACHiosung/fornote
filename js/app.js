@@ -205,9 +205,16 @@ document.addEventListener('DOMContentLoaded', () => {
     function applyGrid(value) {
         const val = Math.max(1, Math.min(192, parseInt(value, 10)));
         if (isNaN(val)) return;
+        const oldSpm = noteData.slotsPerMeasure;
         noteData.setGrid(val);
+        const newSpm = noteData.slotsPerMeasure;
         syncGridUI();
-        renderer.render();
+        // spm이 바뀌어도 마디 물리 높이(slotHeight × spm)를 유지
+        if (newSpm !== oldSpm && newSpm > 0) {
+            renderer.setSlotHeight(renderer.slotHeight * oldSpm / newSpm);
+        } else {
+            renderer.render();
+        }
     }
 
     const gridInput = document.getElementById('grid-input');
