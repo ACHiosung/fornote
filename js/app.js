@@ -192,33 +192,44 @@ document.addEventListener('DOMContentLoaded', () => {
         midiParser.showNotification(`♩ BPM → ${newBpm}`);
     });
 
-    // 8. 그리드 분할 수 조절
-    function applyGrid(value) {
+    // 8. 그리드 분할 수 조절 (토글 방식 — 복수 선택 가능, slotsPerMeasure = LCM)
+    function syncGridUI() {
+        const active = noteData.activeGridDivisions;
+        const gridInput = document.getElementById('grid-input');
+        if (gridInput) gridInput.value = noteData.slotsPerMeasure; // 현재 LCM 표시
+        document.querySelectorAll('.grid-preset-btn').forEach(btn => {
+            btn.classList.toggle('active', active.has(parseInt(btn.dataset.grid, 10)));
+        });
+    }
+
+    function toggleGrid(value) {
         const val = Math.max(1, Math.min(192, parseInt(value, 10)));
         if (isNaN(val)) return;
-
-        // Grid는 클릭 스냅 간격에만 영향 — 내부 저장 해상도(slotsPerMeasure)는 변경하지 않음
-        renderer.gridDivisions = val;
-
-        // 입력 필드 & 프리셋 버튼 동기화
-        const gridInput = document.getElementById('grid-input');
-        if (gridInput) gridInput.value = val;
-        document.querySelectorAll('.grid-preset-btn').forEach(btn => {
-            btn.classList.toggle('active', parseInt(btn.dataset.grid, 10) === val);
-        });
-
+        const next = new Set(noteData.activeGridDivisions);
+        if (next.has(val)) {
+            if (next.size === 1) return; // 최소 1개 유지
+            next.delete(val);
+        } else {
+            next.add(val);
+        }
+        noteData.setActiveGrids(next);
+        syncGridUI();
         renderer.render();
     }
 
     const gridInput = document.getElementById('grid-input');
     if (gridInput) {
-        gridInput.addEventListener('change', (e) => applyGrid(e.target.value));
-        gridInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') applyGrid(e.target.value); });
+        // 입력 필드: 직접 숫자 입력 시 해당 값을 토글
+        gridInput.addEventListener('change', (e) => toggleGrid(e.target.value));
+        gridInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') toggleGrid(e.target.value); });
     }
 
     document.querySelectorAll('.grid-preset-btn').forEach(btn => {
-        btn.addEventListener('click', () => applyGrid(btn.dataset.grid));
+        btn.addEventListener('click', () => toggleGrid(btn.dataset.grid));
     });
+
+    // 초기 UI 동기화 (기본값 16)
+    syncGridUI();
 
     // 9. 초기 렌더링
     renderer.updateZoomUI();

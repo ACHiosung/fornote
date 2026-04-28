@@ -4,15 +4,25 @@
  */
 
 class NoteData {
+    // ──── LCM 헬퍼 ────
+    static _gcd(a, b) { while (b) { [a, b] = [b, a % b]; } return a; }
+    static _lcm(a, b) { return Math.round(a / NoteData._gcd(a, b)) * b; }
+    static _lcmOfSet(set) {
+        if (set.size === 0) return 1;
+        return [...set].reduce((acc, v) => NoteData._lcm(acc, v), 1);
+    }
+
     constructor() {
         // 기본 메타데이터
         this.bpm = 120;
         this.timeSignature = { numerator: 4, denominator: 4 };
-        this.slotsPerBeat = 24; // LCM(분모4, 3) = 12 (16분음표+셋잇단 모두 표현)
         this.totalMeasures = 40;
 
-        // 마디 크기(슬롯 수) 계산
-        this.slotsPerMeasure = this.timeSignature.numerator * this.slotsPerBeat;
+        // 활성 그리드 등분 목록 — slotsPerMeasure = LCM(activeGridDivisions)
+        this.activeGridDivisions = new Set([16]); // 기본값: 16등분
+        this.slotsPerMeasure = NoteData._lcmOfSet(this.activeGridDivisions);
+        // slotsPerBeat: MIDI 입력/녹음 양자화에 사용하는 1박당 슬롯 수
+        this.slotsPerBeat = Math.max(1, Math.floor(this.slotsPerMeasure / this.timeSignature.numerator));
 
         // BPM 변화 기록: [{ measureIndex, slotIndex, bpm }, ...]  (measureIndex는 1-indexed)
         this.bpmChanges = [];
@@ -28,20 +38,57 @@ class NoteData {
         };
     }
 
-    // 메타데이터 업데이트 (UI 연결용)
+    // 메타데이터 업데이트 (MIDI 파서 / UI 연결용)
     updateMetadata(bpm, num, den, slotsPerBeat, totalMeasures) {
         this.bpm = bpm;
         this.timeSignature.numerator = num;
         this.timeSignature.denominator = den;
-        this.slotsPerBeat = slotsPerBeat;
         this.totalMeasures = totalMeasures;
-        // slotsPerBeat는 이미 분모(den) 기준이므로, 단순히 분자 × slotsPerBeat
-        // 예: 4/4 → 4 * 12 = 48, 6/8 → 6 * 24 = 144, 4/16 → 4 * 48 = 192
-        this.slotsPerMeasure = num * slotsPerBeat;
-        // MIDI 파일 로드 시 BPM/박자 변화 기록 초기화 (MIDI 파일 자체에서 재설정됨)
+        // MIDI 임포트: tick 해상도에서 파생된 마디 슬롯 수를 그대로 사용
+        const midiSPM = num * slotsPerBeat;
+        this.slotsPerBeat = slotsPerBeat;
+        this.slotsPerMeasure = midiSPM;
+        // activeGridDivisions를 MIDI 해상도에 맞추어 초기화 (단일 값)
+        this.activeGridDivisions = new Set([midiSPM]);
         this.bpmChanges = [];
         this.tsChanges = [];
         console.log(`Metadata updated: BPM=${this.bpm}, TS=${num}/${den}, slotsPerBeat=${slotsPerBeat}, slotsPerMeasure=${this.slotsPerMeasure}`);
+    }
+
+    // 활성 그리드 등분 목록 변경 — slotsPerMeasure 재계산 및 기존 데이터 리맵핑
+    setActiveGrids(newDivisionsSet) {
+        if (newDivisionsSet.size === 0) return;
+        const oldSPM = this.slotsPerMeasure;
+        const newSPM = NoteData._lcmOfSet(newDivisionsSet);
+        this.activeGridDivisions = new Set(newDivisionsSet);
+        if (newSPM !== oldSPM) {
+            this._remapAllData(oldSPM, newSPM);
+            this.slotsPerMeasure = newSPM;
+            this.slotsPerBeat = Math.max(1, Math.floor(newSPM / this.timeSignature.numerator));
+        }
+    }
+
+    // 슬롯 인덱스를 비례적으로 리맵핑 (해상도 변경 시 노트 위치 보존)
+    _remapAllData(oldSPM, newSPM) {
+        for (const lane in this.lanes) {
+            for (const m of Object.keys(this.lanes[lane])) {
+                const data = this.lanes[lane][m];
+                if (!data) continue;
+                const newData = new Array(newSPM).fill('0');
+                for (let i = 0; i < Math.min(data.length, oldSPM); i++) {
+                    if (data[i] !== '0') {
+                        const newI = Math.round(i * newSPM / oldSPM);
+                        if (newI < newSPM) newData[newI] = data[i];
+                    }
+                }
+                this.lanes[lane][m] = newData.join('');
+            }
+        }
+        // BPM 변화 슬롯도 리맵핑
+        this.bpmChanges = this.bpmChanges.map(c => ({
+            ...c,
+            slotIndex: Math.round(c.slotIndex * newSPM / oldSPM)
+        }));
     }
 
     // 마디의 특정 레인 데이터 문자열 가져오기

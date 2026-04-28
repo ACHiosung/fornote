@@ -25,9 +25,6 @@ class GridRenderer {
         this.slotHeight = 30;
         this.scrollY = 0;
 
-        // Grid 스냅: 1마디를 몇 등분으로 나눠서 클릭을 스냅할지 (UI 전용, 저장 해상도와 무관)
-        this.gridDivisions = 24;
-
         this.init();
     }
 
@@ -112,13 +109,7 @@ class GridRenderer {
 
     getSlotFromY(y) {
         const absoluteY = this.height - y + this.scrollY;
-        const rawAbsSlot = absoluteY / this.slotHeight;
-
-        // 스냅 간격 = slotsPerMeasure / gridDivisions
-        // 클릭 위치를 가장 가까운 그리드 슬롯으로 스냅
-        const spm = this.noteData.slotsPerMeasure;
-        const snapInterval = Math.max(1, Math.floor(spm / this.gridDivisions));
-        let absSlot = Math.round(rawAbsSlot / snapInterval) * snapInterval;
+        let absSlot = Math.round(absoluteY / this.slotHeight);
         if (absSlot < 0) absSlot = 0;
         return absSlot;
     }
@@ -147,19 +138,28 @@ class GridRenderer {
         const gridEndX = gridStartX + (this.laneNames.length * this.laneWidth);
 
         // ===== 1. 그리드 가로선 =====
-        // slotsPerBeat = LCM(분모, 3) → 동적 계산
-        //   분모4 → spb=12:  16분음표=3슬롯, 셋잇단=4슬롯
-        //   분모8 → spb=24:  16분음표=6슬롯, 셋잇단=8슬롯
-        //   분모16→ spb=48:  16분음표=12슬롯, 셋잇단=16슬롯
-        const spb = this.noteData.slotsPerBeat;
-        const sixteenthInterval = spb / 4;   // 16분음표 간격 (spb/4)
-        const tripletInterval = spb / 3;     // 셋잇단음표 간격 (spb/3)
-        const use16th = sixteenthInterval >= 1 && Number.isInteger(sixteenthInterval);
-        const useTriplet = tripletInterval >= 1 && Number.isInteger(tripletInterval);
-
-        // 현재 그리드 설정의 스냅 간격 (사용자 지정 분할선 표시용)
+        // slotsPerMeasure = LCM(activeGridDivisions) — 각 활성 그리드의 분할 간격 계산
         const spm = this.noteData.slotsPerMeasure;
-        const snapInterval = Math.max(1, Math.floor(spm / this.gridDivisions));
+        const spb = this.noteData.slotsPerBeat;  // 1박당 슬롯 (박 선 표시용)
+
+        // 활성 그리드 분할 간격 목록: grid=N → 간격 = spm/N 슬롯
+        const activeGridIntervals = [];
+        for (const div of (this.noteData.activeGridDivisions || new Set([spm]))) {
+            const interval = Math.round(spm / div);
+            if (interval >= 1) activeGridIntervals.push(interval);
+        }
+        // 분할 간격별 색상 팔레트 (최대 8가지 그리드 색상)
+        const gridColors = [
+            "rgba(80,220,200,0.35)",
+            "rgba(255,160,80,0.35)",
+            "rgba(180,120,255,0.35)",
+            "rgba(80,200,100,0.35)",
+            "rgba(255,80,130,0.35)",
+            "rgba(80,160,255,0.35)",
+            "rgba(255,220,60,0.35)",
+            "rgba(200,200,200,0.25)",
+        ];
+        const sortedIntervals = [...new Set(activeGridIntervals)].sort((a, b) => b - a);
 
         ctx.lineWidth = 1;
         for (let m = 1; m <= this.noteData.totalMeasures; m++) {
@@ -169,9 +169,6 @@ class GridRenderer {
 
                 const isMeasureLine = (s === 0);
                 const isBeatLine = (!isMeasureLine && spb >= 1 && s % spb === 0);
-                const isGridSnap = !isMeasureLine && !isBeatLine && (s % snapInterval === 0);
-                const is16th = use16th && (s % sixteenthInterval === 0);
-                const isTriplet = useTriplet && (s % tripletInterval === 0);
 
                 if (isMeasureLine) {
                     // ── 마디선 (굵은 흰색) ──
@@ -189,27 +186,22 @@ class GridRenderer {
                     ctx.lineWidth = 1.5;
                     ctx.beginPath(); ctx.moveTo(gridStartX, y); ctx.lineTo(gridEndX, y); ctx.stroke();
                     ctx.lineWidth = 1;
-                } else if (isGridSnap) {
-                    // ── 현재 그리드 분할선 (밝은 청록색) ──
-                    ctx.strokeStyle = "rgba(80,220,200,0.35)";
-                    ctx.lineWidth = 1;
-                    ctx.beginPath(); ctx.moveTo(gridStartX, y); ctx.lineTo(gridEndX, y); ctx.stroke();
-                } else if (is16th && isTriplet) {
-                    // ── 16분음표와 셋잇단이 겹치는 위치 ──
-                    ctx.strokeStyle = "rgba(255,255,255,0.15)";
-                    ctx.beginPath(); ctx.moveTo(gridStartX, y); ctx.lineTo(gridEndX, y); ctx.stroke();
-                } else if (is16th) {
-                    // ── 16분음표 선 (파란 계열) ──
-                    ctx.strokeStyle = "rgba(130,180,255,0.15)";
-                    ctx.beginPath(); ctx.moveTo(gridStartX, y); ctx.lineTo(gridEndX, y); ctx.stroke();
-                } else if (isTriplet) {
-                    // ── 셋잇단음표 선 (노란 계열) ──
-                    ctx.strokeStyle = "rgba(255,200,80,0.15)";
-                    ctx.beginPath(); ctx.moveTo(gridStartX, y); ctx.lineTo(gridEndX, y); ctx.stroke();
                 } else {
-                    // ── 기타 세분 슬롯 ──
-                    ctx.strokeStyle = "rgba(255,255,255,0.03)";
-                    ctx.beginPath(); ctx.moveTo(gridStartX, y); ctx.lineTo(gridEndX, y); ctx.stroke();
+                    // ── 활성 그리드 분할선: 가장 거친(큰 간격) 그리드부터 색상 적용 ──
+                    let drawn = false;
+                    for (let ci = 0; ci < sortedIntervals.length; ci++) {
+                        if (s % sortedIntervals[ci] === 0) {
+                            ctx.strokeStyle = gridColors[ci % gridColors.length];
+                            ctx.beginPath(); ctx.moveTo(gridStartX, y); ctx.lineTo(gridEndX, y); ctx.stroke();
+                            drawn = true;
+                            break;
+                        }
+                    }
+                    if (!drawn) {
+                        // ── 비활성 슬롯 (그리드 경계 아님) ──
+                        ctx.strokeStyle = "rgba(255,255,255,0.03)";
+                        ctx.beginPath(); ctx.moveTo(gridStartX, y); ctx.lineTo(gridEndX, y); ctx.stroke();
+                    }
                 }
             }
         }
