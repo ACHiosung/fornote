@@ -26,9 +26,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const file = e.target.files[0];
         if (!file) return;
 
+        const targetLane = document.getElementById('midi-target-lane').value || 'normal_1';
+
         const reader = new FileReader();
         reader.onload = async (event) => {
-            await midiParser.parseFromBuffer(event.target.result);
+            await midiParser.parseFromBuffer(event.target.result, targetLane);
             e.target.value = '';
         };
         reader.readAsArrayBuffer(file);

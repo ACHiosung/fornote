@@ -14,6 +14,8 @@ class MidiParser {
     constructor(noteData, renderer) {
         this.noteData = noteData;
         this.renderer = renderer;
+        // true after the first MIDI file is loaded; locks BPM/TS for subsequent loads
+        this.midiLoaded = false;
         this._checkLibrary();
     }
 
@@ -55,7 +57,7 @@ class MidiParser {
         return this._lcm(denominator, 3);
     }
 
-    async parseFromBuffer(arrayBuffer) {
+    async parseFromBuffer(arrayBuffer, targetLane = 'normal_1') {
         if (!this.MidiClass) { this._checkLibrary(); }
         if (!this.MidiClass) {
             this.showNotification('❌ MIDI 라이브러리가 로드되지 않았습니다.', true);
@@ -65,6 +67,9 @@ class MidiParser {
         try {
             const midi = new this.MidiClass(arrayBuffer);
             console.log('[MidiParser] MIDI 파싱 성공, 트랙:', midi.tracks.length);
+
+            // 첫 번째 로드 여부를 미리 기록 (이 함수 내에서 midiLoaded가 변경되므로)
+            const isFirstLoad = !this.midiLoaded;
 
             // ========== 1. MIDI에서 메타데이터 자동 추출 ==========
 
@@ -85,40 +90,54 @@ class MidiParser {
             // PPQ (Pulses Per Quarter Note) 추출 — tick 기반 정밀 변환에 사용
             const ppq = (midi.header && midi.header.ppq) ? midi.header.ppq : 480;
 
-            // ────── 핵심: slotsPerBeat = LCM(분모, 3) ──────
-            const slotsPerBeat = this._calcSlotsPerBeat(tsDen);
+            // 첫 번째 MIDI 로드인 경우에만 메타데이터(BPM, 박자) 적용
+            if (isFirstLoad) {
+                // ────── 핵심: slotsPerBeat = LCM(분모, 3) ──────
+                const slotsPerBeat = this._calcSlotsPerBeat(tsDen);
 
-            // 곡 길이(초) → 총 마디 수 계산
-            const durationSec = midi.duration; // 전체 길이 (초)
-            const secondsPerBeat = 60 / bpm;
-            const beatsPerMeasure = tsNum * (4 / tsDen); // 4분음표 기준 박자 수
-            const secondsPerMeasure = secondsPerBeat * beatsPerMeasure;
-            let totalMeasures = Math.ceil(durationSec / secondsPerMeasure) + 1; // 여유 1마디 추가
-            if (totalMeasures < 1) totalMeasures = 1;
+                // 곡 길이(초) → 총 마디 수 계산
+                const durationSec = midi.duration; // 전체 길이 (초)
+                const secondsPerBeat = 60 / bpm;
+                const beatsPerMeasure = tsNum * (4 / tsDen); // 4분음표 기준 박자 수
+                const secondsPerMeasure = secondsPerBeat * beatsPerMeasure;
+                let totalMeasures = Math.ceil(durationSec / secondsPerMeasure) + 1; // 여유 1마디 추가
+                if (totalMeasures < 1) totalMeasures = 1;
 
-            console.log(`[MidiParser] ──────────────────────────────`);
-            console.log(`[MidiParser] BPM = ${bpm}`);
-            console.log(`[MidiParser] 박자 = ${tsNum}/${tsDen}`);
-            console.log(`[MidiParser] PPQ = ${ppq}`);
-            console.log(`[MidiParser] slotsPerBeat = LCM(${tsDen}, 3) = ${slotsPerBeat}`);
-            console.log(`[MidiParser] 곡 길이 = ${durationSec.toFixed(1)}초, 총 마디 = ${totalMeasures}`);
-            console.log(`[MidiParser] ──────────────────────────────`);
+                console.log(`[MidiParser] ──────────────────────────────`);
+                console.log(`[MidiParser] BPM = ${bpm}`);
+                console.log(`[MidiParser] 박자 = ${tsNum}/${tsDen}`);
+                console.log(`[MidiParser] PPQ = ${ppq}`);
+                console.log(`[MidiParser] slotsPerBeat = LCM(${tsDen}, 3) = ${slotsPerBeat}`);
+                console.log(`[MidiParser] 곡 길이 = ${durationSec.toFixed(1)}초, 총 마디 = ${totalMeasures}`);
+                console.log(`[MidiParser] ──────────────────────────────`);
 
-            // ========== 2. noteData & UI 업데이트 ==========
-            this.noteData.updateMetadata(bpm, tsNum, tsDen, slotsPerBeat, totalMeasures);
+                // ========== 2. noteData & UI 업데이트 ==========
+                this.noteData.updateMetadata(bpm, tsNum, tsDen, slotsPerBeat, totalMeasures);
 
-            // UI 정보 표시 동기화
-            document.getElementById('info-bpm').textContent = `BPM: ${bpm}`;
-            document.getElementById('info-ts').textContent = `박자: ${tsNum}/${tsDen}`;
-            document.getElementById('info-measures').textContent = `마디: ${totalMeasures}`;
+                // UI 정보 표시 동기화
+                document.getElementById('info-bpm').textContent = `BPM: ${bpm}`;
+                document.getElementById('info-ts').textContent = `박자: ${tsNum}/${tsDen}`;
+                document.getElementById('info-measures').textContent = `마디: ${totalMeasures}`;
 
-            // 기존 일반노트 초기화
-            this.noteData.lanes['normal_1'] = {};
-            this.noteData.lanes['normal_2'] = {};
-            this.noteData.lanes['normal_3'] = {};
+                this.midiLoaded = true;
+                // BPM 잠금 안내 표시
+                const lockNotice = document.getElementById('midi-bpm-lock-notice');
+                if (lockNotice) lockNotice.classList.remove('hidden');
+            } else {
+                // 이후 로드: BPM/박자는 첫 번째 MIDI 기준 유지, BPM 변화도 추가하지 않음
+                bpm = this.noteData.bpm;
+                tsNum = this.noteData.timeSignature.numerator;
+                tsDen = this.noteData.timeSignature.denominator;
+                console.log(`[MidiParser] 추가 MIDI 로드 — BPM/박자 잠금 유지 (${bpm}, ${tsNum}/${tsDen}), 라인: ${targetLane}`);
+            }
+
+            // 선택된 라인만 초기화
+            this.noteData.lanes[targetLane] = {};
 
             // ========== 3. 노트 배치 ─ tick 기반 정밀 변환 ==========
             const slotsPerMeasure = this.noteData.slotsPerMeasure;
+            const slotsPerBeat = this.noteData.slotsPerBeat;
+            const secondsPerBeat = 60 / bpm;
 
             // MIDI PPQ 는 4분음표 기준이므로, 4분음표 = PPQ ticks
             // 1박(분모에 의한)의 tick 수 = ppq * (4 / tsDen)
@@ -165,7 +184,7 @@ class MidiParser {
                         console.log(`  note[${ni}]: time=${note.time.toFixed(3)}s, ${tickInfo}, slot=${absSlot} → measure #${measureIndex}, pos ${slotIndex}/${slotsPerMeasure}`);
                     }
 
-                    this.noteData.setSlot('normal_1', measureIndex, slotIndex, '1');
+                    this.noteData.setSlot(targetLane, measureIndex, slotIndex, '1');
                     noteCount++;
                 });
             });
@@ -175,35 +194,37 @@ class MidiParser {
             }
             console.log(`[MidiParser] 완료: ${noteCount}개 배치, ${skippedCount}개 범위 초과 스킵`);
 
-            // ========== 4. BPM 변화 이벤트 추출 (tick → 슬롯 변환) ==========
-            const bpmChangeList = [];
-            if (midi.header && midi.header.tempos) {
-                midi.header.tempos.forEach((tempo) => {
-                    // tick=0 이하는 초기 BPM으로 이미 처리됨 → 스킵
-                    if (tempo.ticks <= 0) return;
+            // ========== 4. BPM 변화 이벤트 추출 (tick → 슬롯 변환, 첫 번째 로드 시에만) ==========
+            if (isFirstLoad) {
+                const bpmChangeList = [];
+                if (midi.header && midi.header.tempos) {
+                    midi.header.tempos.forEach((tempo) => {
+                        // tick=0 이하는 초기 BPM으로 이미 처리됨 → 스킵
+                        if (tempo.ticks <= 0) return;
 
-                    const rawSlot = tempo.ticks / ticksPerSlot;
-                    const absSlot = Math.round(rawSlot);
-                    const { measureIndex, slotIndex } = this.noteData.getMeasureAndSlotFromAbsolute(absSlot);
+                        const rawSlot = tempo.ticks / ticksPerSlot;
+                        const absSlot = Math.round(rawSlot);
+                        const { measureIndex, slotIndex } = this.noteData.getMeasureAndSlotFromAbsolute(absSlot);
 
-                    if (measureIndex <= this.noteData.totalMeasures) {
-                        bpmChangeList.push({
-                            measureIndex,
-                            slotIndex,
-                            bpm: tempo.bpm,
-                        });
-                    }
-                });
+                        if (measureIndex <= this.noteData.totalMeasures) {
+                            bpmChangeList.push({
+                                measureIndex,
+                                slotIndex,
+                                bpm: tempo.bpm,
+                            });
+                        }
+                    });
+                }
+                this.noteData.bpmChanges = bpmChangeList;
+                if (bpmChangeList.length > 0) {
+                    console.log(`[MidiParser] BPM 변화 ${bpmChangeList.length}개 추출:`, bpmChangeList);
+                }
             }
-            this.noteData.bpmChanges = bpmChangeList;
-            if (bpmChangeList.length > 0) {
-                console.log(`[MidiParser] BPM 변화 ${bpmChangeList.length}개 추출:`, bpmChangeList);
-            }
 
-            // ========== 4. 첫 노트 마디 찾기 & 자동 스크롤 ==========
+            // ========== 5. 첫 노트 마디 찾기 & 자동 스크롤 ==========
             let firstMeasureWithNote = -1;
             for (let m = 1; m <= this.noteData.totalMeasures; m++) {
-                let d = this.noteData.lanes['normal_1'][m];
+                let d = this.noteData.lanes[targetLane][m];
                 if (d && d.includes('1')) {
                     if (firstMeasureWithNote === -1) firstMeasureWithNote = m;
                 }
@@ -213,8 +234,14 @@ class MidiParser {
                 this.showNotification('⚠️ MIDI 파일에서 노트를 찾을 수 없습니다.', true);
                 this.renderer.render();
             } else {
+                const laneLabel = targetLane.replace('normal_', '일반 ');
+                const bpmChangeList = this.noteData.bpmChanges || [];
                 const bpmMsg = bpmChangeList.length > 0 ? `, BPM변화 ${bpmChangeList.length}회` : '';
-                this.showNotification(`✅ BPM=${bpm}, ${tsNum}/${tsDen}박, slotsPerBeat=${slotsPerBeat}, ${totalMeasures}마디, ${noteCount}개 노트 로드${bpmMsg}`);
+                if (isFirstLoad) {
+                    this.showNotification(`✅ [${laneLabel}] BPM=${this.noteData.bpm}, ${tsNum}/${tsDen}박, slotsPerBeat=${slotsPerBeat}, ${this.noteData.totalMeasures}마디, ${noteCount}개 노트 로드${bpmMsg}`);
+                } else {
+                    this.showNotification(`✅ [${laneLabel}] ${noteCount}개 노트 로드 (BPM/박자 고정 유지)${bpmMsg}`);
+                }
                 if (firstMeasureWithNote > 0) {
                     this.renderer.scrollToMeasure(firstMeasureWithNote);
                 } else {
