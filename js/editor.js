@@ -183,16 +183,42 @@ class Editor {
         window.addEventListener('mouseup', () => {
             if (this.isDragging) {
                 const dragType = this.dragStartLaneName ? this.dragStartLaneName.split('_')[0] : '';
-                // 통합 레인에서 드래그 없이 뗀 경우 → 일반 노트 토글
+                // 통합 레인에서 드래그 없이 뗀 경우 → 롱노트면 삭제, 아니면 일반 노트 토글
                 if (dragType === 'lane' && !this.dragMoved && this.currentMode !== 'delete') {
                     const laneNum = this.dragStartLaneName.split('_')[1];
-                    let { measureIndex, slotIndex } = this.noteData.getMeasureAndSlotFromAbsolute(this.dragStartAbsSlot);
-                    this.noteData.toggleSlot('normal_' + laneNum, measureIndex, slotIndex);
+                    const longLane = 'long_' + laneNum;
+                    const { measureIndex, slotIndex } = this.noteData.getMeasureAndSlotFromAbsolute(this.dragStartAbsSlot);
+                    const mData = this.noteData.getMeasureData(longLane, measureIndex);
+                    if (mData && mData[slotIndex] === '1') {
+                        // 연결된 롱노트 범위 전체 삭제
+                        const { rangeStart, rangeEnd } = this._getLongNoteRange(longLane, this.dragStartAbsSlot);
+                        this.noteData.setRange(longLane, rangeStart, rangeEnd, '0');
+                    } else {
+                        this.noteData.toggleSlot('normal_' + laneNum, measureIndex, slotIndex);
+                    }
                 }
                 this.isDragging = false;
                 this.dragMoved = false;
                 this.renderer.render();
             }
         });
+    }
+
+    // 특정 absSlot에서 연결된 롱노트 범위(연속 '1') 의 시작/끝 absSlot 반환
+    _getLongNoteRange(longLaneName, absSlot) {
+        const totalSlots = this.noteData.totalMeasures * this.noteData.slotsPerMeasure;
+        const getVal = (i) => {
+            if (i < 0 || i >= totalSlots) return '0';
+            const { measureIndex, slotIndex } = this.noteData.getMeasureAndSlotFromAbsolute(i);
+            const d = this.noteData.getMeasureData(longLaneName, measureIndex);
+            return d ? d[slotIndex] : '0';
+        };
+
+        let start = absSlot;
+        while (start > 0 && getVal(start - 1) === '1') start--;
+        let end = absSlot;
+        while (end < totalSlots - 1 && getVal(end + 1) === '1') end++;
+
+        return { rangeStart: start, rangeEnd: end };
     }
 }
