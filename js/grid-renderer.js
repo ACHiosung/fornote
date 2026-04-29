@@ -12,9 +12,9 @@ class GridRenderer {
         this.height = 600;
         this.dpr = window.devicePixelRatio || 1;
 
+        // 표시 열: normal/long 통합 lane_N, drag, bpm, ts
         this.laneNames = [
-            'normal_1', 'normal_2', 'normal_3',
-            'long_1', 'long_2', 'long_3',
+            'lane_1', 'lane_2', 'lane_3',
             'drag_1', 'drag_2', 'drag_3',
             'bpm_change',
             'ts_change',
@@ -199,9 +199,10 @@ class GridRenderer {
         }
 
         // ===== 2. 세로선 (Lane 구분) =====
+        // 구분선: lane 그룹(0), drag 그룹(3), bpm(6), ts(7), 끝(8)
         for (let i = 0; i <= this.laneNames.length; i++) {
             const x = gridStartX + i * this.laneWidth;
-            if (i === 0 || i === 3 || i === 6 || i === 9 || i === 10 || i === 11) {
+            if (i === 0 || i === 3 || i === 6 || i === 7 || i === 8) {
                 ctx.lineWidth = 2; ctx.strokeStyle = "rgba(255,255,255,0.4)";
             } else {
                 ctx.lineWidth = 1; ctx.strokeStyle = "rgba(255,255,255,0.15)";
@@ -215,8 +216,7 @@ class GridRenderer {
                 const name = this.laneNames[i];
                 const disp = name === 'bpm_change' ? 'BPM' :
                              name === 'ts_change'  ? 'TS' :
-                             name.startsWith("n")  ? "Nml " + name.split('_')[1] :
-                             name.startsWith("l")  ? "Lng " + name.split('_')[1] :
+                             name.startsWith("lane") ? "Ln " + name.split('_')[1] :
                              "Drg " + name.split('_')[1];
                 ctx.fillText(disp, x + this.laneWidth / 2, 15);
             }
@@ -294,6 +294,70 @@ class GridRenderer {
             }
 
             const type = laneName.split('_')[0];
+            const laneNum = laneName.split('_')[1];
+
+            // ── 통합 레인 (lane_N): normal_N 일반 노트 + long_N 롱노트를 한 열에 표시 ──
+            if (type === 'lane') {
+                const normalLane = 'normal_' + laneNum;
+                const longLane   = 'long_'   + laneNum;
+
+                // 롱노트 (green bar) 먼저 그리기
+                let isHolding = false;
+                let holdStartY = 0;
+                for (let m = 1; m <= this.noteData.totalMeasures; m++) {
+                    let mData = this.noteData.lanes[longLane][m];
+                    if (!mData) continue;
+                    for (let s = 0; s < mData.length; s++) {
+                        const v = mData[s];
+                        if (v !== '1') {
+                            if (isHolding) {
+                                const prevY = this.getY(m, s);
+                                const topY = Math.min(holdStartY, prevY);
+                                const h = Math.abs(holdStartY - prevY);
+                                ctx.fillStyle = "rgba(0,230,118,0.7)";
+                                ctx.fillRect(laneX + 5, topY, this.laneWidth - 10, Math.max(h, 4));
+                                isHolding = false;
+                                drawnCount++;
+                            }
+                            continue;
+                        }
+                        const noteY = this.getY(m, s);
+                        if (!isHolding) { isHolding = true; holdStartY = noteY; }
+                        let nextIs1 = false;
+                        if (s + 1 < mData.length) {
+                            nextIs1 = mData[s + 1] === '1';
+                        } else if (m + 1 <= this.noteData.totalMeasures) {
+                            const nextD = this.noteData.lanes[longLane][m + 1];
+                            nextIs1 = nextD && nextD[0] === '1';
+                        }
+                        if (!nextIs1 && isHolding) {
+                            const topY = Math.min(holdStartY, noteY);
+                            const h = Math.abs(holdStartY - noteY);
+                            ctx.fillStyle = "rgba(0,230,118,0.7)";
+                            ctx.fillRect(laneX + 5, topY, this.laneWidth - 10, Math.max(h, 4));
+                            isHolding = false;
+                            drawnCount++;
+                        }
+                    }
+                }
+
+                // 일반 노트 (pink bar) 위에 그리기
+                for (let m = 1; m <= this.noteData.totalMeasures; m++) {
+                    let mData = this.noteData.lanes[normalLane][m];
+                    if (!mData) continue;
+                    for (let s = 0; s < mData.length; s++) {
+                        if (mData[s] !== '1') continue;
+                        const noteY = this.getY(m, s);
+                        if (noteY < -30 || noteY > this.height + 30) continue;
+                        ctx.fillStyle = "#ff3366";
+                        const ch = Math.max(6, this.slotHeight * 0.4);
+                        ctx.fillRect(laneX + 3, noteY - ch / 2, this.laneWidth - 6, ch);
+                        drawnCount++;
+                    }
+                }
+                continue;
+            }
+
             let isHolding = false;
             let holdStartY = 0;
 
@@ -373,8 +437,8 @@ class GridRenderer {
 
         // ===== 4. 디버그 정보 표시 =====
         let totalNotes = 0;
-        for (const lane of this.laneNames) {
-            if (lane === 'bpm_change' || lane === 'ts_change') continue;
+        const dataLanes = ['normal_1', 'normal_2', 'normal_3', 'long_1', 'long_2', 'long_3', 'drag_1', 'drag_2', 'drag_3'];
+        for (const lane of dataLanes) {
             for (let m = 1; m <= this.noteData.totalMeasures; m++) {
                 const d = this.noteData.lanes[lane][m];
                 if (d) totalNotes += (d.match(/[12]/g) || []).length;
