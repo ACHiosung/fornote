@@ -19,31 +19,40 @@ class Editor {
         this.isDragging = false;
         this.dragStartAbsSlot = -1;
         this.dragStartLaneName = '';
-        this.dragMoved = false;  // 드래그 이동 여부 (lane_N 통합 레인 클릭 vs 드래그 판별용)
+        this.dragMoved = false;
 
-        // ── 편집 모드 드래그 상태 ──
-        /**
-         * editDrag: {
-         *   noteType  : 'normal' | 'long' | 'drag'
-         *   srcLaneName : 실제 데이터 레인명 ('normal_1', 'long_2', 'drag_3' 등)
-         *   srcLaneNum  : '1' | '2' | '3'
-         *   srcLaneIdx  : 렌더러 laneNames 인덱스 (0~5)
-         *   srcAbsSlot  : 노트가 있던 absSlot
-         *   rangeStart  : (롱노트) 연속 구간 시작 absSlot
-         *   rangeEnd    : (롱노트) 연속 구간 끝 absSlot
-         *   value       : (드래그 노트) '1' | '2'
-         * }
-         */
+        // ── 편집 모드: 단일 노트 드래그 상태 ──
         this.editDrag = null;
-        this.editDragCurAbsSlot = -1;  // 현재 마우스 위치의 absSlot (스냅 적용)
-        this.editDragCurLaneIdx = -1;  // 현재 마우스 위치의 laneIdx
+        this.editDragCurAbsSlot = -1;
+        this.editDragCurLaneIdx = -1;
+
+        // ── 편집 모드: 범위 선택 드래그 상태 ──
+        // { startX, startY, curX, curY }  (canvas 픽셀 좌표)
+        this.rectSel = null;
+
+        // ── 편집 모드: 선택된 노트 집합 ──
+        // { notes: [...], minLaneIdx, maxLaneIdx, minAbsSlot, maxAbsSlot }
+        this.selection = null;
+
+        // ── 편집 모드: 다중 노트 이동 드래그 상태 ──
+        // { anchorLaneIdx, anchorAbsSlot, curLaneIdx, curAbsSlot }
+        this.multiDrag = null;
 
         // 노트 바 높이 계산 상수
-        this.NOTE_MIN_HEIGHT  = 6;   // 최소 노트 높이 (px)
+        this.NOTE_MIN_HEIGHT   = 6;   // 최소 노트 높이 (px)
         this.NOTE_HEIGHT_RATIO = 0.4; // slotHeight 대비 노트 높이 비율
+
+        // Ln 레인 그룹 인덱스 범위 (renderer.laneNames 기준)
+        this.LN_IDX_MIN  = 0;
+        this.LN_IDX_MAX  = 2;
+        this.DRG_IDX_MIN = 3;
+        this.DRG_IDX_MAX = 5;
 
         // 초기 canvas 클래스 설정
         this.canvas.classList.add('cursor-note');
+
+        // renderer postRender 콜백으로 선택 하이라이트 그리기
+        this.renderer.postRenderCallback = () => this._drawSelectionHighlights();
 
         this.bindEvents();
     }
@@ -54,8 +63,14 @@ class Editor {
 
     setEditorMode(mode) {
         this.editorMode = mode;
+        // 편집 모드 관련 상태 전부 초기화
+        this.editDrag    = null;
+        this.rectSel     = null;
+        this.selection   = null;
+        this.multiDrag   = null;
         this.canvas.classList.remove('cursor-note', 'cursor-edit', 'cursor-edit-grabbing');
         this.canvas.classList.add(mode === 'edit' ? 'cursor-edit' : 'cursor-note');
+        this.renderer.render();
     }
 
     // 마우스 이벤트 -> laneName, absSlot 변환
@@ -79,7 +94,6 @@ class Editor {
         // 스크롤 및 줌
         this.canvas.addEventListener('wheel', (e) => {
             e.preventDefault();
-            // 재생 중 휠: 마디 단위 이동 (위 = 이전 마디, 아래 = 다음 마디)
             if (this.player && this.player.isPlaying) {
                 const delta = e.deltaY > 0 ? 1 : -1;
                 this.player.seekToMeasure(this.player.getCurrentMeasure() + delta);
@@ -93,11 +107,10 @@ class Editor {
             }
         });
 
-        // 클릭 다운
+        // ── mousedown ──
         this.canvas.addEventListener('mousedown', (e) => {
             if (e.button !== 0) return;
             const info = this.getSlotInfoFromEvent(e);
-            if (!info.laneName) return;
 
             // ────────────── 편집 모드 ──────────────
             if (this.editorMode === 'edit') {
@@ -106,11 +119,10 @@ class Editor {
             }
 
             // ────────────── 노트 모드 ──────────────
+            if (!info.laneName) return;
 
-            // BPM 변화 레인은 읽기 전용 – 편집 불가
             if (info.laneName === 'bpm_change') return;
 
-            // 박자 변화 레인 – 클릭으로 추가/삭제
             if (info.laneName === 'ts_change') {
                 let { measureIndex, slotIndex } = this.noteData.getMeasureAndSlotFromAbsolute(info.absSlot);
                 if (this.currentMode === 'delete') {
@@ -138,7 +150,6 @@ class Editor {
                 return;
             }
 
-            // 지우개 모드
             if (this.currentMode === 'delete') {
                 let { measureIndex, slotIndex } = this.noteData.getMeasureAndSlotFromAbsolute(info.absSlot);
                 const laneType = info.laneName.split('_')[0];
@@ -156,9 +167,7 @@ class Editor {
                 return;
             }
 
-            // 쓰기 모드: 레인 이름에서 노트 타입 결정
-            const laneType = info.laneName.split('_')[0]; // 'lane', 'drag'
-
+            const laneType = info.laneName.split('_')[0];
             if (laneType === 'lane') {
                 this.isDragging = true;
                 this.dragStartAbsSlot = info.absSlot;
@@ -176,7 +185,7 @@ class Editor {
             }
         });
 
-        // 마우스 무브
+        // ── mousemove ──
         this.canvas.addEventListener('mousemove', (e) => {
             const info = this.getSlotInfoFromEvent(e);
 
@@ -189,15 +198,19 @@ class Editor {
                 infoLabel.innerText = '-';
             }
 
-            // ────────────── 편집 모드 드래그 ──────────────
+            // ────────────── 편집 모드 ──────────────
             if (this.editorMode === 'edit') {
                 if (this.editDrag) {
                     this._editModeMouseMove(info);
+                } else if (this.multiDrag) {
+                    this._updateMultiDrag(info);
+                } else if (this.rectSel) {
+                    this._updateRectSel(info.x, info.y);
                 }
                 return;
             }
 
-            // ────────────── 노트 모드 드래그 ──────────────
+            // ────────────── 노트 모드 ──────────────
             if (this.isDragging) {
                 const dragType = this.dragStartLaneName ? this.dragStartLaneName.split('_')[0] : '';
 
@@ -229,15 +242,20 @@ class Editor {
             }
         });
 
-        // 드래그 종료
+        // ── mouseup ──
         window.addEventListener('mouseup', () => {
-            // ── 편집 모드 드래그 종료 ──
-            if (this.editorMode === 'edit' && this.editDrag) {
-                this._editModeMouseUp();
+            if (this.editorMode === 'edit') {
+                if (this.editDrag) {
+                    this._editModeMouseUp();
+                } else if (this.multiDrag) {
+                    this._applyMultiDrag();
+                } else if (this.rectSel) {
+                    this._finishRectSel();
+                }
                 return;
             }
 
-            // ── 노트 모드 드래그 종료 ──
+            // 노트 모드 드래그 종료
             if (this.isDragging) {
                 const dragType = this.dragStartLaneName ? this.dragStartLaneName.split('_')[0] : '';
                 if (dragType === 'lane' && !this.dragMoved && this.currentMode !== 'delete') {
@@ -260,18 +278,35 @@ class Editor {
     }
 
     // ═══════════════════════════════════════════════════════
-    //  편집 모드 내부 메서드
+    //  편집 모드 - 단일 노트 드래그 (기존 동작)
     // ═══════════════════════════════════════════════════════
 
-    /** mousedown 처리: 클릭 위치에 노트가 있으면 드래그 시작 */
     _editModeMouseDown(info) {
-        if (!info.laneName) return;
-        const laneType = info.laneName.split('_')[0];
+        // 활성 선택 영역이 있으면 → 내부 클릭 시 다중 이동 시작, 외부 클릭 시 선택 해제
+        if (this.selection && this.selection.notes.length > 0) {
+            if (info.laneIdx >= 0 && this._isInSelectionBounds(info)) {
+                this._startMultiDrag(info);
+                return;
+            }
+            // 선택 영역 밖 클릭 → 선택 해제
+            this.selection = null;
+            this.renderer.render();
+        }
 
-        // bpm_change / ts_change 레인은 편집 모드에서도 무시
+        if (!info.laneName) return;
         if (info.laneName === 'bpm_change' || info.laneName === 'ts_change') return;
 
-        const laneNum = info.laneName.split('_')[1];
+        // 단일 노트 드래그 시도
+        if (this._tryStartSingleNoteDrag(info)) return;
+
+        // 빈 공간 클릭 → 범위 선택 시작
+        this._startRectSel(info.x, info.y);
+    }
+
+    /** 노트 위에서 클릭 시 단일 드래그 시작. 노트가 있으면 true 반환 */
+    _tryStartSingleNoteDrag(info) {
+        const laneType = info.laneName.split('_')[0];
+        const laneNum  = info.laneName.split('_')[1];
         const { measureIndex, slotIndex } = this.noteData.getMeasureAndSlotFromAbsolute(info.absSlot);
 
         if (laneType === 'lane') {
@@ -281,92 +316,75 @@ class Editor {
             const longData   = this.noteData.getMeasureData(longLane,   measureIndex);
 
             if (normalData && normalData[slotIndex] === '1') {
-                // 일반 노트 잡기
                 this.editDrag = {
-                    noteType:    'normal',
-                    srcLaneName: normalLane,
-                    srcLaneNum:  laneNum,
-                    srcLaneIdx:  info.laneIdx,
-                    srcAbsSlot:  info.absSlot,
+                    noteType: 'normal', srcLaneName: normalLane,
+                    srcLaneNum: laneNum, srcLaneIdx: info.laneIdx, srcAbsSlot: info.absSlot,
                 };
                 this.editDragCurAbsSlot = info.absSlot;
                 this.editDragCurLaneIdx = info.laneIdx;
                 this._setEditCursor(true);
+                return true;
             } else if (longData && longData[slotIndex] === '1') {
-                // 롱노트 잡기
                 const { rangeStart, rangeEnd } = this._getLongNoteRange(longLane, info.absSlot);
                 this.editDrag = {
-                    noteType:    'long',
-                    srcLaneName: longLane,
-                    srcLaneNum:  laneNum,
-                    srcLaneIdx:  info.laneIdx,
-                    srcAbsSlot:  info.absSlot,
-                    rangeStart,
-                    rangeEnd,
+                    noteType: 'long', srcLaneName: longLane,
+                    srcLaneNum: laneNum, srcLaneIdx: info.laneIdx, srcAbsSlot: info.absSlot,
+                    rangeStart, rangeEnd,
                 };
                 this.editDragCurAbsSlot = info.absSlot;
                 this.editDragCurLaneIdx = info.laneIdx;
                 this._setEditCursor(true);
+                return true;
             }
         } else if (laneType === 'drag') {
             const dragData = this.noteData.getMeasureData(info.laneName, measureIndex);
             const val = dragData ? dragData[slotIndex] : '0';
             if (val === '1' || val === '2') {
                 this.editDrag = {
-                    noteType:    'drag',
-                    srcLaneName: info.laneName,
-                    srcLaneNum:  laneNum,
-                    srcLaneIdx:  info.laneIdx,
-                    srcAbsSlot:  info.absSlot,
-                    value:       val,
+                    noteType: 'drag', srcLaneName: info.laneName,
+                    srcLaneNum: laneNum, srcLaneIdx: info.laneIdx, srcAbsSlot: info.absSlot,
+                    value: val,
                 };
                 this.editDragCurAbsSlot = info.absSlot;
                 this.editDragCurLaneIdx = info.laneIdx;
                 this._setEditCursor(true);
+                return true;
             }
         }
+        return false;
     }
 
-    /** mousemove 처리: 드래그 중 ghost 표시 */
+    /** mousemove 처리: 단일 노트 드래그 중 ghost 표시 */
     _editModeMouseMove(info) {
         const drag = this.editDrag;
-        const srcLaneType = drag.srcLaneName.split('_')[0]; // 'normal','long','drag'
-        const isLaneGroup = (srcLaneType === 'normal' || srcLaneType === 'long'); // Ln열
+        const srcLaneType = drag.srcLaneName.split('_')[0];
+        const isLaneGroup = (srcLaneType === 'normal' || srcLaneType === 'long');
 
-        // ── 레인 인덱스 갱신 (같은 그룹 내에서만 이동 허용) ──
         if (info.laneIdx >= 0 && info.laneName) {
             const targetType = info.laneName.split('_')[0];
             if (isLaneGroup && targetType === 'lane') {
-                // Ln 그룹 (laneIdx 0~2) 내에서만
                 this.editDragCurLaneIdx = info.laneIdx;
             } else if (!isLaneGroup && targetType === 'drag') {
-                // Drg 그룹 (laneIdx 3~5) 내에서만
                 this.editDragCurLaneIdx = info.laneIdx;
             }
-            // 다른 그룹(bpm/ts/반대 그룹) 진입 시 레인 인덱스 유지
         }
 
-        // ── absSlot 갱신 ──
-        // 다른 레인으로 이동 중: 원래 타이밍 유지
-        // 같은 레인 내 이동: 마우스 Y 위치의 그리드 스냅 값 사용
+        // 다른 레인 이동 시 타이밍 유지
         if (this.editDragCurLaneIdx !== drag.srcLaneIdx) {
             this.editDragCurAbsSlot = drag.srcAbsSlot;
-        } else {
-            if (info.absSlot >= 0) {
-                this.editDragCurAbsSlot = info.absSlot;
-            }
+        } else if (info.absSlot >= 0) {
+            this.editDragCurAbsSlot = info.absSlot;
         }
 
         this.renderer.render();
         this._drawEditGhost();
     }
 
-    /** mouseup 처리: 이동 확정 */
+    /** mouseup 처리: 단일 노트 이동 확정 */
     _editModeMouseUp() {
         const drag = this.editDrag;
         const newAbsSlot = this.editDragCurAbsSlot;
         const newLaneIdx = this.editDragCurLaneIdx;
-
         const moved = (newAbsSlot !== drag.srcAbsSlot) || (newLaneIdx !== drag.srcLaneIdx);
 
         if (moved) {
@@ -374,38 +392,29 @@ class Editor {
             const newLaneNum  = newLaneName ? newLaneName.split('_')[1] : drag.srcLaneNum;
 
             if (drag.noteType === 'normal') {
-                // 원래 위치 삭제
                 const { measureIndex: oldM, slotIndex: oldS } =
                     this.noteData.getMeasureAndSlotFromAbsolute(drag.srcAbsSlot);
                 this.noteData.setSlot(drag.srcLaneName, oldM, oldS, '0');
-                // 새 위치 배치
-                const newRealLane = 'normal_' + newLaneNum;
                 const { measureIndex: newM, slotIndex: newS } =
                     this.noteData.getMeasureAndSlotFromAbsolute(newAbsSlot);
-                this.noteData.setSlot(newRealLane, newM, newS, '1');
+                this.noteData.setSlot('normal_' + newLaneNum, newM, newS, '1');
 
             } else if (drag.noteType === 'long') {
                 const delta    = newAbsSlot - drag.srcAbsSlot;
                 const newStart = drag.rangeStart + delta;
                 const newEnd   = drag.rangeEnd   + delta;
-                // 원래 범위 삭제
                 this.noteData.setRange(drag.srcLaneName, drag.rangeStart, drag.rangeEnd, '0');
-                // 새 범위 배치
-                const newRealLane = 'long_' + newLaneNum;
                 if (newStart >= 0) {
-                    this.noteData.setRange(newRealLane, newStart, newEnd, '1');
+                    this.noteData.setRange('long_' + newLaneNum, newStart, newEnd, '1');
                 }
 
             } else if (drag.noteType === 'drag') {
-                // 원래 위치 삭제
                 const { measureIndex: oldM, slotIndex: oldS } =
                     this.noteData.getMeasureAndSlotFromAbsolute(drag.srcAbsSlot);
                 this.noteData.setSlot(drag.srcLaneName, oldM, oldS, '0');
-                // 새 위치 배치 (값 보존)
-                const newRealLane = 'drag_' + newLaneNum;
                 const { measureIndex: newM, slotIndex: newS } =
                     this.noteData.getMeasureAndSlotFromAbsolute(newAbsSlot);
-                this.noteData.setSlot(newRealLane, newM, newS, drag.value);
+                this.noteData.setSlot('drag_' + newLaneNum, newM, newS, drag.value);
             }
         }
 
@@ -416,7 +425,393 @@ class Editor {
         this.renderer.render();
     }
 
-    /** 편집 모드에서 ghost note 오버레이 그리기 */
+    // ═══════════════════════════════════════════════════════
+    //  편집 모드 - 범위 선택 (rect selection)
+    // ═══════════════════════════════════════════════════════
+
+    _startRectSel(x, y) {
+        this.rectSel = { startX: x, startY: y, curX: x, curY: y };
+    }
+
+    _updateRectSel(x, y) {
+        this.rectSel.curX = x;
+        this.rectSel.curY = y;
+        this.renderer.render();
+        this._drawRectSelBox();
+    }
+
+    _finishRectSel() {
+        const sel = this.rectSel;
+        this.rectSel = null;
+        if (!sel) { this.renderer.render(); return; }
+
+        const minX = Math.min(sel.startX, sel.curX);
+        const maxX = Math.max(sel.startX, sel.curX);
+        const minY = Math.min(sel.startY, sel.curY);
+        const maxY = Math.max(sel.startY, sel.curY);
+
+        // 최소 드래그 크기 3px 미만은 무시
+        if (maxX - minX < 3 && maxY - minY < 3) {
+            this.renderer.render();
+            return;
+        }
+
+        const notes = this._collectNotesInRect(minX, maxX, minY, maxY);
+
+        if (notes.length > 0) {
+            let minLaneIdx = Infinity, maxLaneIdx = -Infinity;
+            let minAbsSlot = Infinity, maxAbsSlot = -Infinity;
+            for (const n of notes) {
+                minLaneIdx = Math.min(minLaneIdx, n.srcLaneIdx);
+                maxLaneIdx = Math.max(maxLaneIdx, n.srcLaneIdx);
+                const s0 = n.noteType === 'long' ? n.rangeStart : n.srcAbsSlot;
+                const s1 = n.noteType === 'long' ? n.rangeEnd   : n.srcAbsSlot;
+                minAbsSlot = Math.min(minAbsSlot, s0);
+                maxAbsSlot = Math.max(maxAbsSlot, s1);
+            }
+            this.selection = { notes, minLaneIdx, maxLaneIdx, minAbsSlot, maxAbsSlot };
+        }
+
+        this.renderer.render();
+    }
+
+    /**
+     * 픽셀 사각형 내의 노트를 수집하여 반환.
+     * - Ln열: normal_N(일반 노트) + long_N(롱노트 범위)
+     * - Drg열: drag_N
+     */
+    _collectNotesInRect(minX, maxX, minY, maxY) {
+        const rdr  = this.renderer;
+        const nd   = this.noteData;
+        const gridStartX = rdr.getGridStartX();
+        const laneW  = rdr.laneWidth;
+        const slotH  = rdr.slotHeight;
+        const h      = rdr.height;
+        const scroll = rdr.scrollY;
+        const spm    = nd.slotsPerMeasure;
+
+        // Y 픽셀 → absSlot 범위 (비스냅)
+        // noteY = h - absSlot*slotH + scroll  →  absSlot = (h - noteY + scroll) / slotH
+        const absSlotMin = (h - maxY + scroll) / slotH;
+        const absSlotMax = (h - minY + scroll) / slotH;
+
+        // X 픽셀 → laneIdx 범위
+        const relMinX   = minX - gridStartX;
+        const relMaxX   = maxX - gridStartX;
+        const laneIdxMin = Math.max(0, Math.floor(relMinX / laneW));
+        const laneIdxMax = Math.min(rdr.laneNames.length - 1, Math.floor(relMaxX / laneW));
+
+        // 마디 범위 (여유분 포함)
+        const mStart = Math.max(1, Math.floor(absSlotMin / spm));
+        const mEnd   = Math.min(nd.totalMeasures, Math.ceil(absSlotMax / spm) + 1);
+
+        const notes = [];
+
+        for (let li = laneIdxMin; li <= laneIdxMax; li++) {
+            const laneName = rdr.laneNames[li];
+            if (!laneName || laneName === 'bpm_change' || laneName === 'ts_change') continue;
+
+            const laneType = laneName.split('_')[0];
+            const laneNum  = laneName.split('_')[1];
+
+            if (laneType === 'lane') {
+                const normalLane = 'normal_' + laneNum;
+                const longLane   = 'long_'   + laneNum;
+
+                // 일반 노트
+                for (let m = mStart; m <= mEnd; m++) {
+                    const d = nd.lanes[normalLane][m];
+                    if (!d) continue;
+                    for (let s = 0; s < d.length; s++) {
+                        if (d[s] !== '1') continue;
+                        const absSlot = nd.getAbsoluteSlotIndex(m, s);
+                        if (absSlot >= absSlotMin && absSlot <= absSlotMax) {
+                            notes.push({
+                                noteType: 'normal', srcLaneName: normalLane,
+                                srcLaneNum: laneNum, srcLaneIdx: li, srcAbsSlot: absSlot,
+                            });
+                        }
+                    }
+                }
+
+                // 롱노트 (Y 범위에 걸치는 범위 전체 선택)
+                const visitedLong = new Set();
+                for (let m = mStart; m <= mEnd; m++) {
+                    const d = nd.lanes[longLane][m];
+                    if (!d) continue;
+                    for (let s = 0; s < d.length; s++) {
+                        if (d[s] !== '1') continue;
+                        const absSlot = nd.getAbsoluteSlotIndex(m, s);
+                        if (absSlot < absSlotMin || absSlot > absSlotMax) continue;
+                        const { rangeStart, rangeEnd } = this._getLongNoteRange(longLane, absSlot);
+                        const key = `${rangeStart}-${rangeEnd}`;
+                        if (!visitedLong.has(key)) {
+                            visitedLong.add(key);
+                            notes.push({
+                                noteType: 'long', srcLaneName: longLane,
+                                srcLaneNum: laneNum, srcLaneIdx: li,
+                                srcAbsSlot: rangeStart, rangeStart, rangeEnd,
+                            });
+                        }
+                    }
+                }
+
+            } else if (laneType === 'drag') {
+                for (let m = mStart; m <= mEnd; m++) {
+                    const d = nd.lanes[laneName][m];
+                    if (!d) continue;
+                    for (let s = 0; s < d.length; s++) {
+                        if (d[s] !== '1' && d[s] !== '2') continue;
+                        const absSlot = nd.getAbsoluteSlotIndex(m, s);
+                        if (absSlot >= absSlotMin && absSlot <= absSlotMax) {
+                            notes.push({
+                                noteType: 'drag', srcLaneName: laneName,
+                                srcLaneNum: laneNum, srcLaneIdx: li,
+                                srcAbsSlot: absSlot, value: d[s],
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        return notes;
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  편집 모드 - 다중 노트 이동 (multi-drag)
+    // ═══════════════════════════════════════════════════════
+
+    /** 선택 영역이 현재 마우스 위치를 포함하는지 (픽셀 기준, scroll/zoom 반응) */
+    _isInSelectionBounds(info) {
+        const sel = this.selection;
+        if (!sel || !sel.notes || sel.notes.length === 0) return false;
+
+        const gridStartX = this.renderer.getGridStartX();
+        const laneW = this.renderer.laneWidth;
+        const PAD   = 8; // 클릭 허용 여백 (px)
+
+        let pxMinX = Infinity, pxMaxX = -Infinity;
+        let pxMinY = Infinity, pxMaxY = -Infinity;
+        const ch = this._noteBarHeight();
+
+        for (const n of sel.notes) {
+            const lx = gridStartX + n.srcLaneIdx * laneW;
+            pxMinX = Math.min(pxMinX, lx);
+            pxMaxX = Math.max(pxMaxX, lx + laneW);
+
+            if (n.noteType === 'long') {
+                const { measureIndex: m1, slotIndex: s1 } =
+                    this.noteData.getMeasureAndSlotFromAbsolute(n.rangeStart);
+                const { measureIndex: m2, slotIndex: s2 } =
+                    this.noteData.getMeasureAndSlotFromAbsolute(n.rangeEnd);
+                const y1 = this.renderer.getY(m1, s1);
+                const y2 = this.renderer.getY(m2, s2);
+                pxMinY = Math.min(pxMinY, Math.min(y1, y2));
+                pxMaxY = Math.max(pxMaxY, Math.max(y1, y2));
+            } else {
+                const { measureIndex, slotIndex } =
+                    this.noteData.getMeasureAndSlotFromAbsolute(n.srcAbsSlot);
+                const ny = this.renderer.getY(measureIndex, slotIndex);
+                pxMinY = Math.min(pxMinY, ny - ch / 2);
+                pxMaxY = Math.max(pxMaxY, ny + ch / 2);
+            }
+        }
+
+        return info.x >= pxMinX - PAD && info.x <= pxMaxX + PAD &&
+               info.y >= pxMinY - PAD && info.y <= pxMaxY + PAD;
+    }
+
+    _startMultiDrag(info) {
+        this.multiDrag = {
+            anchorLaneIdx: info.laneIdx,
+            anchorAbsSlot: info.absSlot,
+            curLaneIdx:    info.laneIdx,
+            curAbsSlot:    info.absSlot,
+        };
+        this._setEditCursor(true);
+    }
+
+    _updateMultiDrag(info) {
+        if (info.laneIdx >= 0) this.multiDrag.curLaneIdx = info.laneIdx;
+        if (info.absSlot >= 0) this.multiDrag.curAbsSlot = info.absSlot;
+        this.renderer.render();
+        this._drawMultiDragGhosts();
+    }
+
+    /**
+     * 다중 이동 확정.
+     * 1) 모든 노트의 목적지를 먼저 계산한다.
+     * 2) 하나라도 레인 범위를 벗어나면 confirm 팝업을 띄운다.
+     * 3) 확인 시: 범위 내 이동 가능한 노트만 이동한다 (범위 벗어난 노트는 그대로 유지).
+     *    취소 시: 아무 노트도 이동하지 않는다.
+     */
+    _applyMultiDrag() {
+        const md  = this.multiDrag;
+        const sel = this.selection;
+        this.multiDrag = null;
+        this._setEditCursor(false);
+
+        if (!md || !sel || sel.notes.length === 0) {
+            this.renderer.render();
+            return;
+        }
+
+        const laneDelta = md.curLaneIdx - md.anchorLaneIdx;
+        const slotDelta = laneDelta === 0 ? (md.curAbsSlot - md.anchorAbsSlot) : 0;
+
+        if (laneDelta === 0 && slotDelta === 0) {
+            this.renderer.render();
+            return;
+        }
+
+        // ── 1단계: 모든 노트의 이동 가능 여부 사전 확인 ──
+        let anyOverflow = false;
+        for (const n of sel.notes) {
+            const newLaneIdx = n.srcLaneIdx + laneDelta;
+            const isDrg = n.noteType === 'drag';
+            if (isDrg) {
+                if (newLaneIdx < this.DRG_IDX_MIN || newLaneIdx > this.DRG_IDX_MAX) {
+                    anyOverflow = true;
+                    break;
+                }
+            } else {
+                if (newLaneIdx < this.LN_IDX_MIN || newLaneIdx > this.LN_IDX_MAX) {
+                    anyOverflow = true;
+                    break;
+                }
+            }
+        }
+
+        // ── 2단계: 범위 초과 노트가 있으면 확인 팝업 ──
+        if (anyOverflow) {
+            const ok = window.confirm(
+                '일부 노트가 레인 범위를 벗어납니다.\n' +
+                '범위를 벗어난 노트는 이동되지 않습니다.\n' +
+                '계속하시겠습니까?'
+            );
+            if (!ok) {
+                // 취소 → 아무것도 이동하지 않음, 선택 유지
+                this.renderer.render();
+                return;
+            }
+        }
+
+        // ── 3단계: 이동 가능한 노트 목록 확정 ──
+        const movable = sel.notes.filter(n => {
+            const newLaneIdx = n.srcLaneIdx + laneDelta;
+            const isDrg = n.noteType === 'drag';
+            if (isDrg) return newLaneIdx >= this.DRG_IDX_MIN && newLaneIdx <= this.DRG_IDX_MAX;
+            return newLaneIdx >= this.LN_IDX_MIN && newLaneIdx <= this.LN_IDX_MAX;
+        });
+
+        if (movable.length === 0) {
+            this.renderer.render();
+            return;
+        }
+
+        // ── 4단계: 기존 위치 삭제 → 새 위치 배치 (원자적 적용) ──
+
+        // 삭제 먼저 (이동 충돌 방지)
+        for (const n of movable) {
+            if (n.noteType === 'normal') {
+                const { measureIndex: m, slotIndex: s } =
+                    this.noteData.getMeasureAndSlotFromAbsolute(n.srcAbsSlot);
+                this.noteData.setSlot(n.srcLaneName, m, s, '0');
+            } else if (n.noteType === 'long') {
+                this.noteData.setRange(n.srcLaneName, n.rangeStart, n.rangeEnd, '0');
+            } else if (n.noteType === 'drag') {
+                const { measureIndex: m, slotIndex: s } =
+                    this.noteData.getMeasureAndSlotFromAbsolute(n.srcAbsSlot);
+                this.noteData.setSlot(n.srcLaneName, m, s, '0');
+            }
+        }
+
+        // 새 위치 배치
+        for (const n of movable) {
+            const newLaneIdx = n.srcLaneIdx + laneDelta;
+            const newRendLane = this.renderer.laneNames[newLaneIdx]; // 'lane_N' or 'drag_N'
+            const newLaneNum  = newRendLane.split('_')[1];
+
+            if (n.noteType === 'normal') {
+                const newAbsSlot = Math.max(0, n.srcAbsSlot + slotDelta);
+                const { measureIndex: m, slotIndex: s } =
+                    this.noteData.getMeasureAndSlotFromAbsolute(newAbsSlot);
+                this.noteData.setSlot('normal_' + newLaneNum, m, s, '1');
+            } else if (n.noteType === 'long') {
+                const newStart = n.rangeStart + slotDelta;
+                const newEnd   = n.rangeEnd   + slotDelta;
+                if (newStart >= 0) {
+                    this.noteData.setRange('long_' + newLaneNum, newStart, newEnd, '1');
+                }
+            } else if (n.noteType === 'drag') {
+                const newAbsSlot = Math.max(0, n.srcAbsSlot + slotDelta);
+                const { measureIndex: m, slotIndex: s } =
+                    this.noteData.getMeasureAndSlotFromAbsolute(newAbsSlot);
+                this.noteData.setSlot('drag_' + newLaneNum, m, s, n.value);
+            }
+        }
+
+        this.selection = null;
+        this.renderer.render();
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  편집 모드 - 그리기 (오버레이)
+    // ═══════════════════════════════════════════════════════
+
+    /** 범위 선택 사각형 그리기 */
+    _drawRectSelBox() {
+        const sel = this.rectSel;
+        if (!sel) return;
+
+        const ctx = this.renderer.ctx;
+        const dpr = this.renderer.dpr;
+        ctx.save();
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        const x = Math.min(sel.startX, sel.curX);
+        const y = Math.min(sel.startY, sel.curY);
+        const w = Math.abs(sel.curX - sel.startX);
+        const h = Math.abs(sel.curY - sel.startY);
+
+        ctx.fillStyle   = 'rgba(100,200,255,0.10)';
+        ctx.fillRect(x, y, w, h);
+        ctx.strokeStyle = 'rgba(100,200,255,0.90)';
+        ctx.lineWidth   = 1.5;
+        ctx.setLineDash([5, 3]);
+        ctx.strokeRect(x, y, w, h);
+        ctx.setLineDash([]);
+
+        ctx.restore();
+    }
+
+    /** 선택된 노트 하이라이트 (postRenderCallback에서 호출) */
+    _drawSelectionHighlights() {
+        const sel = this.selection;
+        if (!sel || !sel.notes || sel.notes.length === 0) return;
+
+        const ctx = this.renderer.ctx;
+        const dpr = this.renderer.dpr;
+        const laneW = this.renderer.laneWidth;
+        const gridStartX = this.renderer.getGridStartX();
+
+        ctx.save();
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        for (const n of sel.notes) {
+            const lx = gridStartX + n.srcLaneIdx * laneW;
+            if (n.noteType === 'long') {
+                this._ghostOutlineLong(ctx, lx, n.rangeStart, n.rangeEnd, laneW, 'rgba(100,200,255,0.9)');
+            } else {
+                this._ghostOutlineNormal(ctx, lx, n.srcAbsSlot, laneW, 'rgba(100,200,255,0.9)');
+            }
+        }
+
+        ctx.restore();
+    }
+
+    /** 단일 노트 드래그 ghost 그리기 */
     _drawEditGhost() {
         const drag = this.editDrag;
         if (!drag) return;
@@ -429,20 +824,16 @@ class Editor {
         ctx.save();
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-        // 원래 노트 위치에 반투명 어두운 마스크 (드래그 중임을 표시)
         const srcX = gridStartX + drag.srcLaneIdx * laneW;
-
         if (drag.noteType === 'normal') {
             this._ghostDimNormal(ctx, srcX, drag.srcAbsSlot, laneW, 'rgba(0,0,0,0.55)');
         } else if (drag.noteType === 'long') {
             this._ghostDimLong(ctx, srcX, drag.rangeStart, drag.rangeEnd, laneW, 'rgba(0,0,0,0.55)');
-        } else if (drag.noteType === 'drag') {
+        } else {
             this._ghostDimNormal(ctx, srcX, drag.srcAbsSlot, laneW, 'rgba(0,0,0,0.55)');
         }
 
-        // 새 위치에 ghost 노트
         const dstX = gridStartX + this.editDragCurLaneIdx * laneW;
-
         if (drag.noteType === 'normal') {
             this._ghostDimNormal(ctx, dstX, this.editDragCurAbsSlot, laneW, 'rgba(255,51,102,0.55)');
             this._ghostOutlineNormal(ctx, dstX, this.editDragCurAbsSlot, laneW, 'rgba(255,51,102,1)');
@@ -452,9 +843,9 @@ class Editor {
             const newEnd   = drag.rangeEnd   + delta;
             this._ghostDimLong(ctx, dstX, newStart, newEnd, laneW, 'rgba(0,230,118,0.45)');
             this._ghostOutlineLong(ctx, dstX, newStart, newEnd, laneW, 'rgba(0,230,118,1)');
-        } else if (drag.noteType === 'drag') {
-            const ghostColor = drag.value === '2' ? 'rgba(255,34,34,0.55)' : 'rgba(255,204,0,0.55)';
-            const outlineColor = drag.value === '2' ? 'rgba(255,34,34,1)' : 'rgba(255,204,0,1)';
+        } else {
+            const ghostColor   = drag.value === '2' ? 'rgba(255,34,34,0.55)' : 'rgba(255,204,0,0.55)';
+            const outlineColor = drag.value === '2' ? 'rgba(255,34,34,1)'    : 'rgba(255,204,0,1)';
             this._ghostDimNormal(ctx, dstX, this.editDragCurAbsSlot, laneW, ghostColor);
             this._ghostOutlineNormal(ctx, dstX, this.editDragCurAbsSlot, laneW, outlineColor);
         }
@@ -462,13 +853,81 @@ class Editor {
         ctx.restore();
     }
 
-    // ── ghost 헬퍼 ──
+    /** 다중 노트 이동 ghost 그리기 */
+    _drawMultiDragGhosts() {
+        const md  = this.multiDrag;
+        const sel = this.selection;
+        if (!md || !sel) return;
+
+        const ctx = this.renderer.ctx;
+        const dpr = this.renderer.dpr;
+        const laneW = this.renderer.laneWidth;
+        const gridStartX = this.renderer.getGridStartX();
+
+        const laneDelta = md.curLaneIdx - md.anchorLaneIdx;
+        const slotDelta = laneDelta === 0 ? (md.curAbsSlot - md.anchorAbsSlot) : 0;
+
+        ctx.save();
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        for (const n of sel.notes) {
+            const srcX = gridStartX + n.srcLaneIdx * laneW;
+            const newLaneIdx = n.srcLaneIdx + laneDelta;
+
+            const isDrg  = n.noteType === 'drag';
+            const overflow = isDrg
+                ? (newLaneIdx < this.DRG_IDX_MIN || newLaneIdx > this.DRG_IDX_MAX)
+                : (newLaneIdx < this.LN_IDX_MIN  || newLaneIdx > this.LN_IDX_MAX);
+
+            // 원래 위치 어둡게
+            if (n.noteType === 'long') {
+                this._ghostDimLong(ctx, srcX, n.rangeStart, n.rangeEnd, laneW, 'rgba(0,0,0,0.55)');
+            } else {
+                this._ghostDimNormal(ctx, srcX, n.srcAbsSlot, laneW, 'rgba(0,0,0,0.55)');
+            }
+
+            if (!overflow) {
+                const dstX = gridStartX + newLaneIdx * laneW;
+                if (n.noteType === 'normal') {
+                    const na = n.srcAbsSlot + slotDelta;
+                    this._ghostDimNormal(ctx, dstX, na, laneW, 'rgba(255,51,102,0.50)');
+                    this._ghostOutlineNormal(ctx, dstX, na, laneW, 'rgba(255,51,102,1)');
+                } else if (n.noteType === 'long') {
+                    const ns = n.rangeStart + slotDelta;
+                    const ne = n.rangeEnd   + slotDelta;
+                    this._ghostDimLong(ctx, dstX, ns, ne, laneW, 'rgba(0,230,118,0.45)');
+                    this._ghostOutlineLong(ctx, dstX, ns, ne, laneW, 'rgba(0,230,118,1)');
+                } else {
+                    const na = n.srcAbsSlot + slotDelta;
+                    const gc = n.value === '2' ? 'rgba(255,34,34,0.50)' : 'rgba(255,204,0,0.50)';
+                    const oc = n.value === '2' ? 'rgba(255,34,34,1)'    : 'rgba(255,204,0,1)';
+                    this._ghostDimNormal(ctx, dstX, na, laneW, gc);
+                    this._ghostOutlineNormal(ctx, dstX, na, laneW, oc);
+                }
+            } else {
+                // 레인 범위 초과: 원래 위치에 빨간 경고 tint
+                if (n.noteType === 'long') {
+                    this._ghostDimLong(ctx, srcX, n.rangeStart, n.rangeEnd, laneW, 'rgba(255,60,60,0.45)');
+                } else {
+                    this._ghostDimNormal(ctx, srcX, n.srcAbsSlot, laneW, 'rgba(255,60,60,0.45)');
+                }
+            }
+        }
+
+        ctx.restore();
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  ghost 헬퍼
+    // ═══════════════════════════════════════════════════════
 
     _noteBarHeight() {
         return Math.max(this.NOTE_MIN_HEIGHT, this.renderer.slotHeight * this.NOTE_HEIGHT_RATIO);
     }
 
     _ghostDimNormal(ctx, laneX, absSlot, laneW, fillStyle) {
+        const total = this.noteData.totalMeasures * this.noteData.slotsPerMeasure;
+        if (absSlot < 0 || absSlot >= total) return;
         const { measureIndex, slotIndex } = this.noteData.getMeasureAndSlotFromAbsolute(absSlot);
         const noteY = this.renderer.getY(measureIndex, slotIndex);
         const ch = this._noteBarHeight();
@@ -477,17 +936,21 @@ class Editor {
     }
 
     _ghostOutlineNormal(ctx, laneX, absSlot, laneW, strokeStyle) {
+        const total = this.noteData.totalMeasures * this.noteData.slotsPerMeasure;
+        if (absSlot < 0 || absSlot >= total) return;
         const { measureIndex, slotIndex } = this.noteData.getMeasureAndSlotFromAbsolute(absSlot);
         const noteY = this.renderer.getY(measureIndex, slotIndex);
         const ch = this._noteBarHeight();
         ctx.strokeStyle = strokeStyle;
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth   = 1.5;
         ctx.strokeRect(laneX + 3, noteY - ch / 2, laneW - 6, ch);
     }
 
     _ghostDimLong(ctx, laneX, absStart, absEnd, laneW, fillStyle) {
-        const start = Math.min(absStart, absEnd);
-        const end   = Math.max(absStart, absEnd);
+        const total = this.noteData.totalMeasures * this.noteData.slotsPerMeasure;
+        const start = Math.max(0, Math.min(absStart, absEnd));
+        const end   = Math.min(total - 1, Math.max(absStart, absEnd));
+        if (start >= total || end < 0) return;
         const { measureIndex: m1, slotIndex: s1 } = this.noteData.getMeasureAndSlotFromAbsolute(start);
         const { measureIndex: m2, slotIndex: s2 } = this.noteData.getMeasureAndSlotFromAbsolute(end);
         const y1 = this.renderer.getY(m1, s1);
@@ -499,8 +962,10 @@ class Editor {
     }
 
     _ghostOutlineLong(ctx, laneX, absStart, absEnd, laneW, strokeStyle) {
-        const start = Math.min(absStart, absEnd);
-        const end   = Math.max(absStart, absEnd);
+        const total = this.noteData.totalMeasures * this.noteData.slotsPerMeasure;
+        const start = Math.max(0, Math.min(absStart, absEnd));
+        const end   = Math.min(total - 1, Math.max(absStart, absEnd));
+        if (start >= total || end < 0) return;
         const { measureIndex: m1, slotIndex: s1 } = this.noteData.getMeasureAndSlotFromAbsolute(start);
         const { measureIndex: m2, slotIndex: s2 } = this.noteData.getMeasureAndSlotFromAbsolute(end);
         const y1 = this.renderer.getY(m1, s1);
@@ -508,7 +973,7 @@ class Editor {
         const topY = Math.min(y1, y2);
         const h    = Math.max(Math.abs(y1 - y2), 4);
         ctx.strokeStyle = strokeStyle;
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth   = 1.5;
         ctx.strokeRect(laneX + 5, topY, laneW - 10, h);
     }
 
@@ -521,7 +986,6 @@ class Editor {
     //  공통 헬퍼
     // ═══════════════════════════════════════════════════════
 
-    // 특정 absSlot에서 연결된 롱노트 범위(연속 '1') 의 시작/끝 absSlot 반환
     _getLongNoteRange(longLaneName, absSlot) {
         const totalSlots = this.noteData.totalMeasures * this.noteData.slotsPerMeasure;
         const getVal = (i) => {

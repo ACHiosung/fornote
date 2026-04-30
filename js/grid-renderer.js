@@ -28,6 +28,9 @@ class GridRenderer {
         /** 재생 커서 위치 (절대 슬롯, 소수 허용). null이면 미표시 */
         this.playbackCursorAbsSlot = null;
 
+        /** 렌더 완료 후 호출되는 콜백 (편집 모드 오버레이 등에 사용) */
+        this.postRenderCallback = null;
+
         this.init();
     }
 
@@ -479,6 +482,11 @@ class GridRenderer {
             ctx.stroke();
             ctx.setLineDash([]);
             ctx.restore();
+        }
+
+        // ===== 6. postRender 콜백 (편집 모드 선택 오버레이 등) =====
+        if (typeof this.postRenderCallback === 'function') {
+            this.postRenderCallback();
         }
     }
 }
