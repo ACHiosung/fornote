@@ -186,7 +186,7 @@ class Editor {
         this.canvas.addEventListener('wheel', (e) => {
             e.preventDefault();
             if (this.player && this.player.isPlaying) {
-                const delta = e.deltaY > 0 ? 1 : -1;
+                const delta = e.deltaY > 0 ? -1 : 1;
                 this.player.seekToMeasure(this.player.getCurrentMeasure() + delta);
                 return;
             }
