@@ -42,6 +42,12 @@
                     <input type="file" id="midi-upload" accept=".mid,.midi">
                 </label>
                 <span id="midi-bpm-lock-notice" class="info-tag midi-bpm-lock hidden">⚠ 이미 MIDI 파일을 불러왔으니 BPM 변경이 불가합니다</span>
+                <label class="btn" id="music-upload-label" title="재생할 음악 파일 선택 (MP3, OGG, WAV 등)">
+                    🎵 음악 로드
+                    <input type="file" id="music-upload" accept="audio/*">
+                </label>
+                <span id="music-filename" class="info-tag" style="display:none;"></span>
+                <button id="play-btn" class="btn primary-btn">▶ 재생</button>
                 <button id="export-txt-btn" class="btn">TXT 내보내기</button>
                 <button id="midi-record-init-btn" class="btn">🎹 MIDI 녹음</button>
             </div>
@@ -122,7 +128,9 @@
                     - 좌클릭 (Ln 열): 일반 노트 배치<br/>
                     - 드래그 (Ln 열): 롱노트 구간 설정<br/>
                     - 클릭/드래그 (Drg 열): 드래그 노트<br/>
-                    - 노트 타입·레인은 마우스 위치로 자동 결정
+                    - 노트 타입·레인은 마우스 위치로 자동 결정<br/>
+                    <strong>재생 중:</strong><br/>
+                    - 휠: 마디 이동 (위=이전, 아래=다음)
                 </p>
             </aside>
 
@@ -149,6 +157,7 @@
     <script src="js/midi-input-recorder.js"></script>
     <script src="js/grid-renderer.js"></script>
     <script src="js/editor.js"></script>
+    <script src="js/player.js"></script>
     <script src="js/exporter.js"></script>
     <script src="js/app.js"></script>
 </body>

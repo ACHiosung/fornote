@@ -11,6 +11,9 @@ class Editor {
         // 상태 변수
         this.currentMode = 'write';    // write, delete
 
+        /** Player 인스턴스 참조 (app.js에서 주입). 재생 중 휠 이동에 사용 */
+        this.player = null;
+
         this.isDragging = false;
         this.dragStartAbsSlot = -1;
         this.dragStartLaneName = '';
@@ -44,6 +47,12 @@ class Editor {
         // 스크롤 및 줌
         this.canvas.addEventListener('wheel', (e) => {
             e.preventDefault();
+            // 재생 중 휠: 마디 단위 이동 (위 = 이전 마디, 아래 = 다음 마디)
+            if (this.player && this.player.isPlaying) {
+                const delta = e.deltaY > 0 ? 1 : -1;
+                this.player.seekToMeasure(this.player.getCurrentMeasure() + delta);
+                return;
+            }
             if (e.ctrlKey || e.shiftKey) {
                 let delta = e.deltaY > 0 ? -2 : 2;
                 this.renderer.setZoom(delta);

@@ -25,7 +25,15 @@ class GridRenderer {
         this.measureHeight = 480;        // 마디당 픽셀 높이 (zoom의 primary 값)
         this.scrollY = 0;
 
+        /** 재생 커서 위치 (절대 슬롯, 소수 허용). null이면 미표시 */
+        this.playbackCursorAbsSlot = null;
+
         this.init();
+    }
+
+    // 재생 커서 위치 설정 (Player에서 호출)
+    setPlaybackCursor(absSlot) {
+        this.playbackCursorAbsSlot = absSlot;
     }
 
     init() {
@@ -450,5 +458,27 @@ class GridRenderer {
         ctx.font = "12px monospace";
         ctx.textAlign = "left";
         ctx.fillText(`Data: ${totalNotes} notes | BPM changes: ${bpmChangeCount} | TS changes: ${tsChangeCount} | Drawn: ${drawnCount} | Scroll: ${Math.round(this.scrollY)}`, 10, this.height - 8);
+
+        // ===== 5. 재생 커서 =====
+        if (this.playbackCursorAbsSlot != null) {
+            const absF = this.playbackCursorAbsSlot;
+            const absFloor = Math.floor(absF);
+            const frac = absF - absFloor;
+            const { measureIndex, slotIndex } = this.noteData.getMeasureAndSlotFromAbsolute(absFloor);
+            const baseY = this.getY(measureIndex, slotIndex);
+            // 슬롯 사이를 보간하여 부드럽게 이동 (y값은 위로 갈수록 감소)
+            const cursorY = baseY - frac * this.slotHeight;
+
+            ctx.save();
+            ctx.strokeStyle = 'rgba(255, 220, 0, 0.9)';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([6, 3]);
+            ctx.beginPath();
+            ctx.moveTo(gridStartX, cursorY);
+            ctx.lineTo(gridEndX, cursorY);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.restore();
+        }
     }
 }

@@ -10,6 +10,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const midiParser = new MidiParser(noteData, renderer);
     const exporter = new Exporter(noteData);
     const midiRecorder = new MidiInputRecorder(noteData, renderer);
+    const player = new Player(noteData, renderer);
+
+    // editor에 player 주입 (재생 중 휠 이동에 사용)
+    editor.player = player;
 
     // 2. 편집 모드 버튼
     const modeBtns = document.querySelectorAll('.tool-btn');
@@ -40,6 +44,40 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('export-txt-btn').addEventListener('click', () => {
         exporter.downloadTXT();
     });
+
+    // ─────────────────────────────────────────────
+    //  5b. 음악 파일 로드 & 재생 버튼
+    // ─────────────────────────────────────────────
+
+    const musicUpload   = document.getElementById('music-upload');
+    const musicFilename = document.getElementById('music-filename');
+    const playBtn       = document.getElementById('play-btn');
+
+    musicUpload.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        try {
+            await player.loadMusicFile(file);
+            musicFilename.textContent = file.name;
+            musicFilename.style.display = '';
+        } catch (err) {
+            alert('음악 파일 로드 실패: ' + err.message);
+        }
+        e.target.value = '';
+    });
+
+    playBtn.addEventListener('click', () => {
+        if (player.isPlaying) {
+            player.stop();
+        } else {
+            player.play(1);
+        }
+    });
+
+    player.onPlayStateChange = (isPlaying) => {
+        playBtn.textContent = isPlaying ? '■ 정지' : '▶ 재생';
+        playBtn.classList.toggle('playing', isPlaying);
+    };
 
     // 6. 줌 컨트롤
     document.getElementById('zoom-in-btn').addEventListener('click', () => {
