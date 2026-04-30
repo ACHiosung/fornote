@@ -691,7 +691,7 @@ class Editor {
         if (anyOverflow) {
             const ok = window.confirm(
                 '일부 노트가 레인 범위를 벗어납니다.\n' +
-                '범위를 벗어난 노트는 이동되지 않습니다.\n' +
+                '범위를 벗어난 노트는 삭제됩니다.\n' +
                 '계속하시겠습니까?'
             );
             if (!ok) {
@@ -709,15 +709,10 @@ class Editor {
             return newLaneIdx >= this.LN_IDX_MIN && newLaneIdx <= this.LN_IDX_MAX;
         });
 
-        if (movable.length === 0) {
-            this.renderer.render();
-            return;
-        }
+        // ── 4단계: 선택된 모든 노트 삭제 (범위 초과 포함) → 이동 가능 노트만 새 위치에 배치 ──
 
-        // ── 4단계: 기존 위치 삭제 → 새 위치 배치 (원자적 적용) ──
-
-        // 삭제 먼저 (이동 충돌 방지)
-        for (const n of movable) {
+        // 전체 삭제 먼저 (이동 충돌 방지, 범위 초과 노트도 함께 삭제)
+        for (const n of sel.notes) {
             if (n.noteType === 'normal') {
                 const { measureIndex: m, slotIndex: s } =
                     this.noteData.getMeasureAndSlotFromAbsolute(n.srcAbsSlot);
@@ -731,7 +726,7 @@ class Editor {
             }
         }
 
-        // 새 위치 배치
+        // 새 위치 배치 (이동 가능한 노트만)
         for (const n of movable) {
             const newLaneIdx = n.srcLaneIdx + laneDelta;
             const newRendLane = this.renderer.laneNames[newLaneIdx]; // 'lane_N' or 'drag_N'

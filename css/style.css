@@ -34,21 +34,23 @@ body {
 
 /* Toolbar */
 .toolbar {
-    height: 50px;
+    min-height: 50px;
     background-color: var(--bg-toolbar);
     border-bottom: 1px solid var(--border-color);
     display: flex;
+    flex-wrap: wrap;
     justify-content: space-between;
     align-items: center;
-    padding: 0 16px;
+    padding: 6px 16px;
     z-index: 10;
-    gap: 12px;
+    gap: 8px;
 }
 
 .toolbar-section {
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-wrap: wrap;
 }
 
 .logo {
