@@ -280,6 +280,9 @@ class Player {
     // ── 내부: 모든 소스 노드 정지 ──
     _stopSources() {
         if (this.musicSource) {
+            // onended를 먼저 해제해 stop() 이후 비동기로 발화되는 이벤트가
+            // _onEnded()를 잘못 호출하는 레이스 컨디션을 방지한다.
+            this.musicSource.onended = null;
             try { this.musicSource.stop(); } catch (e) {
                 if (e.name !== 'InvalidStateError') console.warn('[Player] musicSource.stop():', e.message);
             }
