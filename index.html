@@ -32,10 +32,16 @@
             </div>
 
             <div class="toolbar-section actions">
+                <select id="midi-target-lane" class="record-select" title="MIDI 노트를 쓸 일반 라인 선택">
+                    <option value="normal_1">일반 1</option>
+                    <option value="normal_2">일반 2</option>
+                    <option value="normal_3">일반 3</option>
+                </select>
                 <label class="btn primary-btn">
                     MIDI 로드
                     <input type="file" id="midi-upload" accept=".mid,.midi">
                 </label>
+                <span id="midi-bpm-lock-notice" class="info-tag midi-bpm-lock hidden">⚠ 이미 MIDI 파일을 불러왔으니 BPM 변경이 불가합니다</span>
                 <button id="export-txt-btn" class="btn">TXT 내보내기</button>
                 <button id="midi-record-init-btn" class="btn">🎹 MIDI 녹음</button>
             </div>
