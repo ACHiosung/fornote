@@ -158,6 +158,9 @@ class Editor {
             targetMeasure += 1;
         }
 
+        // 마디 시작이 화면에 보이도록 한 마디 위를 기준으로 사용
+        targetMeasure += 1;
+
         return Math.max(1, Math.min(nd.totalMeasures, targetMeasure));
     }
 
