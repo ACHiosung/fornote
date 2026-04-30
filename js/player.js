@@ -10,7 +10,7 @@ class Player {
         this.audioCtx = null;
         this.musicBuffer = null;
         this.tambourineBuffer = null;
-        this._tambourineLoading = false;
+        this._tambourineLoadPromise = null;
 
         this.musicSource = null;
         this.scheduledSources = [];
@@ -43,24 +43,46 @@ class Player {
         }
     }
 
-    // ── 탬버린 효과음 로드 (sounds/tambourine.wav) ──
-    async _ensureTambourine() {
-        if (this.tambourineBuffer || this._tambourineLoading) return;
-        this._tambourineLoading = true;
-        try {
-            const resp = await fetch('sounds/tambourine.wav');
-            if (!resp.ok) {
-                console.warn('[Player] 탬버린 효과음 없음: sounds/tambourine.wav (재생 시 효과음 없이 동작)');
-                return;
+    // ── 탬버린 효과음 로드 (sounds/tambourine.wav). 없으면 합성 클릭음으로 폴백 ──
+    _ensureTambourine() {
+        // 이미 준비됐으면 즉시 해결되는 Promise 반환
+        if (this.tambourineBuffer) return Promise.resolve();
+        // 로딩 중이면 같은 Promise를 재사용해 완료까지 대기
+        if (this._tambourineLoadPromise) return this._tambourineLoadPromise;
+
+        this._tambourineLoadPromise = (async () => {
+            try {
+                const resp = await fetch('sounds/tambourine.wav');
+                if (resp.ok) {
+                    const ab = await resp.arrayBuffer();
+                    this.tambourineBuffer = await this.audioCtx.decodeAudioData(ab);
+                    console.log('[Player] 탬버린 효과음 로드 완료');
+                    return;
+                }
+                console.warn('[Player] sounds/tambourine.wav 없음 → 합성 클릭음으로 대체');
+            } catch (e) {
+                console.warn('[Player] 탬버린 로드 실패, 합성 클릭음으로 대체:', e.message);
             }
-            const ab = await resp.arrayBuffer();
-            this.tambourineBuffer = await this.audioCtx.decodeAudioData(ab);
-            console.log('[Player] 탬버린 효과음 로드 완료');
-        } catch (e) {
-            console.warn('[Player] 탬버린 로드 실패:', e.message);
-        } finally {
-            this._tambourineLoading = false;
+            // 폴백: Web Audio API로 짧은 클릭음(화이트노이즈 + 감쇠) 합성
+            this.tambourineBuffer = this._makeSyntheticClick();
+        })();
+
+        return this._tambourineLoadPromise;
+    }
+
+    // ── 합성 클릭음 버퍼 생성 (50ms 화이트노이즈 + 지수 감쇠) ──
+    _makeSyntheticClick() {
+        const ctx = this.audioCtx;
+        const duration = 0.05; // 50ms
+        const sampleRate = ctx.sampleRate;
+        const frameCount = Math.ceil(sampleRate * duration);
+        const buffer = ctx.createBuffer(1, frameCount, sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < frameCount; i++) {
+            // 화이트노이즈에 지수 감쇠 적용 → 타악기 느낌
+            data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (frameCount * 0.15));
         }
+        return buffer;
     }
 
     // ── 음악 파일 로드 ──
