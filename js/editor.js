@@ -361,14 +361,11 @@ class Editor {
     /** mousemove 처리: 단일 노트 드래그 중 ghost 표시 */
     _editModeMouseMove(info) {
         const drag = this.editDrag;
-        const srcLaneType = drag.srcLaneName.split('_')[0];
-        const isLaneGroup = (srcLaneType === 'normal' || srcLaneType === 'long');
 
         if (info.laneIdx >= 0 && info.laneName) {
             const targetType = info.laneName.split('_')[0];
-            if (isLaneGroup && targetType === 'lane') {
-                this.editDragCurLaneIdx = info.laneIdx;
-            } else if (!isLaneGroup && targetType === 'drag') {
+            // 일반/롱/드래그 노트 모두 lane ↔ drag 간 이동 허용
+            if (targetType === 'lane' || targetType === 'drag') {
                 this.editDragCurLaneIdx = info.laneIdx;
             }
         }
@@ -394,6 +391,8 @@ class Editor {
         if (moved) {
             const newLaneName = this.renderer.laneNames[newLaneIdx];
             const newLaneNum  = newLaneName ? newLaneName.split('_')[1] : drag.srcLaneNum;
+            const targetIsDrag = newLaneName && newLaneName.startsWith('drag_');
+            const targetIsLane = newLaneName && newLaneName.startsWith('lane_');
 
             if (drag.noteType === 'normal') {
                 const { measureIndex: oldM, slotIndex: oldS } =
@@ -401,15 +400,33 @@ class Editor {
                 this.noteData.setSlot(drag.srcLaneName, oldM, oldS, '0');
                 const { measureIndex: newM, slotIndex: newS } =
                     this.noteData.getMeasureAndSlotFromAbsolute(newAbsSlot);
-                this.noteData.setSlot('normal_' + newLaneNum, newM, newS, '1');
+                if (targetIsDrag) {
+                    // 일반 노트 → 드래그 레인: 드래그 노트 '1' 로 배치
+                    this.noteData.setSlot('drag_' + newLaneNum, newM, newS, '1');
+                } else {
+                    this.noteData.setSlot('normal_' + newLaneNum, newM, newS, '1');
+                }
 
             } else if (drag.noteType === 'long') {
-                const delta    = newAbsSlot - drag.srcAbsSlot;
-                const newStart = drag.rangeStart + delta;
-                const newEnd   = drag.rangeEnd   + delta;
-                this.noteData.setRange(drag.srcLaneName, drag.rangeStart, drag.rangeEnd, '0');
-                if (newStart >= 0) {
-                    this.noteData.setRange('long_' + newLaneNum, newStart, newEnd, '1');
+                if (targetIsDrag) {
+                    // 롱노트 → 드래그 레인: 경고 후 삭제만 수행
+                    const ok = window.confirm(
+                        '롱노트를 드래그 레인으로 이동할 수 없습니다.\n' +
+                        '해당 롱노트는 삭제됩니다.\n' +
+                        '계속하시겠습니까?'
+                    );
+                    if (ok) {
+                        this.noteData.setRange(drag.srcLaneName, drag.rangeStart, drag.rangeEnd, '0');
+                    }
+                    // cancel 시 noteData 변경 없이 상태만 초기화
+                } else {
+                    const delta    = newAbsSlot - drag.srcAbsSlot;
+                    const newStart = drag.rangeStart + delta;
+                    const newEnd   = drag.rangeEnd   + delta;
+                    this.noteData.setRange(drag.srcLaneName, drag.rangeStart, drag.rangeEnd, '0');
+                    if (newStart >= 0) {
+                        this.noteData.setRange('long_' + newLaneNum, newStart, newEnd, '1');
+                    }
                 }
 
             } else if (drag.noteType === 'drag') {
@@ -418,7 +435,12 @@ class Editor {
                 this.noteData.setSlot(drag.srcLaneName, oldM, oldS, '0');
                 const { measureIndex: newM, slotIndex: newS } =
                     this.noteData.getMeasureAndSlotFromAbsolute(newAbsSlot);
-                this.noteData.setSlot('drag_' + newLaneNum, newM, newS, drag.value);
+                if (targetIsLane) {
+                    // 드래그 노트 → 일반 레인: 일반 노트 '1' 로 배치
+                    this.noteData.setSlot('normal_' + newLaneNum, newM, newS, '1');
+                } else {
+                    this.noteData.setSlot('drag_' + newLaneNum, newM, newS, drag.value);
+                }
             }
         }
 
@@ -671,29 +693,26 @@ class Editor {
 
         // ── 1단계: 모든 노트의 이동 가능 여부 사전 확인 ──
         let anyOverflow = false;
+        let anyLongToDrag = false;
         for (const n of sel.notes) {
             const newLaneIdx = n.srcLaneIdx + laneDelta;
-            const isDrg = n.noteType === 'drag';
-            if (isDrg) {
-                if (newLaneIdx < this.DRG_IDX_MIN || newLaneIdx > this.DRG_IDX_MAX) {
-                    anyOverflow = true;
-                    break;
-                }
+            // 전체 노트 레인 범위 (0 ~ DRG_IDX_MAX) 벗어나면 overflow
+            if (newLaneIdx < 0 || newLaneIdx > this.DRG_IDX_MAX) {
+                anyOverflow = true;
             } else {
-                if (newLaneIdx < this.LN_IDX_MIN || newLaneIdx > this.LN_IDX_MAX) {
-                    anyOverflow = true;
-                    break;
+                const targetLane = this.renderer.laneNames[newLaneIdx];
+                if (n.noteType === 'long' && targetLane && targetLane.startsWith('drag_')) {
+                    anyLongToDrag = true;
                 }
             }
         }
 
-        // ── 2단계: 범위 초과 노트가 있으면 확인 팝업 ──
-        if (anyOverflow) {
-            const ok = window.confirm(
-                '일부 노트가 레인 범위를 벗어납니다.\n' +
-                '범위를 벗어난 노트는 삭제됩니다.\n' +
-                '계속하시겠습니까?'
-            );
+        // ── 2단계: 문제가 있는 경우 확인 팝업 ──
+        if (anyOverflow || anyLongToDrag) {
+            const msgs = [];
+            if (anyOverflow)    msgs.push('범위를 벗어난 노트는 삭제됩니다.');
+            if (anyLongToDrag)  msgs.push('롱노트를 드래그 레인으로 이동할 수 없어 삭제됩니다.');
+            const ok = window.confirm(msgs.join('\n') + '\n계속하시겠습니까?');
             if (!ok) {
                 // 취소 → 아무것도 이동하지 않음, 선택 유지
                 this.renderer.render();
@@ -701,12 +720,13 @@ class Editor {
             }
         }
 
-        // ── 3단계: 이동 가능한 노트 목록 확정 ──
+        // ── 3단계: 이동 가능한 노트 목록 확정 (overflow 및 long→drag 제외) ──
         const movable = sel.notes.filter(n => {
             const newLaneIdx = n.srcLaneIdx + laneDelta;
-            const isDrg = n.noteType === 'drag';
-            if (isDrg) return newLaneIdx >= this.DRG_IDX_MIN && newLaneIdx <= this.DRG_IDX_MAX;
-            return newLaneIdx >= this.LN_IDX_MIN && newLaneIdx <= this.LN_IDX_MAX;
+            if (newLaneIdx < 0 || newLaneIdx > this.DRG_IDX_MAX) return false;
+            const targetLane = this.renderer.laneNames[newLaneIdx];
+            if (n.noteType === 'long' && targetLane && targetLane.startsWith('drag_')) return false;
+            return true;
         });
 
         // ── 4단계: 선택된 모든 노트 삭제 (범위 초과 포함) → 이동 가능 노트만 새 위치에 배치 ──
@@ -726,18 +746,25 @@ class Editor {
             }
         }
 
-        // 새 위치 배치 (이동 가능한 노트만)
+        // 새 위치 배치 (이동 가능한 노트만, 타입 변환 포함)
         for (const n of movable) {
-            const newLaneIdx = n.srcLaneIdx + laneDelta;
+            const newLaneIdx  = n.srcLaneIdx + laneDelta;
             const newRendLane = this.renderer.laneNames[newLaneIdx]; // 'lane_N' or 'drag_N'
             const newLaneNum  = newRendLane.split('_')[1];
+            const targetIsDrag = newRendLane.startsWith('drag_');
+            const targetIsLane = newRendLane.startsWith('lane_');
 
             if (n.noteType === 'normal') {
                 const newAbsSlot = Math.max(0, n.srcAbsSlot + slotDelta);
                 const { measureIndex: m, slotIndex: s } =
                     this.noteData.getMeasureAndSlotFromAbsolute(newAbsSlot);
-                this.noteData.setSlot('normal_' + newLaneNum, m, s, '1');
+                if (targetIsDrag) {
+                    this.noteData.setSlot('drag_' + newLaneNum, m, s, '1');
+                } else {
+                    this.noteData.setSlot('normal_' + newLaneNum, m, s, '1');
+                }
             } else if (n.noteType === 'long') {
+                // long→drag は movable から除外済みなので必ずlane行き
                 const newStart = n.rangeStart + slotDelta;
                 const newEnd   = n.rangeEnd   + slotDelta;
                 if (newStart >= 0) {
@@ -747,7 +774,11 @@ class Editor {
                 const newAbsSlot = Math.max(0, n.srcAbsSlot + slotDelta);
                 const { measureIndex: m, slotIndex: s } =
                     this.noteData.getMeasureAndSlotFromAbsolute(newAbsSlot);
-                this.noteData.setSlot('drag_' + newLaneNum, m, s, n.value);
+                if (targetIsLane) {
+                    this.noteData.setSlot('normal_' + newLaneNum, m, s, '1');
+                } else {
+                    this.noteData.setSlot('drag_' + newLaneNum, m, s, n.value);
+                }
             }
         }
 
@@ -833,20 +864,43 @@ class Editor {
         }
 
         const dstX = gridStartX + this.editDragCurLaneIdx * laneW;
+        const dstRendLane = this.renderer.laneNames[this.editDragCurLaneIdx];
+        const dstIsDrag = dstRendLane && dstRendLane.startsWith('drag_');
+        const dstIsLane = dstRendLane && dstRendLane.startsWith('lane_');
+
         if (drag.noteType === 'normal') {
-            this._ghostDimNormal(ctx, dstX, this.editDragCurAbsSlot, laneW, 'rgba(255,51,102,0.55)');
-            this._ghostOutlineNormal(ctx, dstX, this.editDragCurAbsSlot, laneW, 'rgba(255,51,102,1)');
+            if (dstIsDrag) {
+                // 일반 노트 → 드래그 레인: 드래그 노트 색으로 표시
+                this._ghostDimNormal(ctx, dstX, this.editDragCurAbsSlot, laneW, 'rgba(255,145,0,0.55)');
+                this._ghostOutlineNormal(ctx, dstX, this.editDragCurAbsSlot, laneW, 'rgba(255,145,0,1)');
+            } else {
+                this._ghostDimNormal(ctx, dstX, this.editDragCurAbsSlot, laneW, 'rgba(255,51,102,0.55)');
+                this._ghostOutlineNormal(ctx, dstX, this.editDragCurAbsSlot, laneW, 'rgba(255,51,102,1)');
+            }
         } else if (drag.noteType === 'long') {
-            const delta    = this.editDragCurAbsSlot - drag.srcAbsSlot;
-            const newStart = drag.rangeStart + delta;
-            const newEnd   = drag.rangeEnd   + delta;
-            this._ghostDimLong(ctx, dstX, newStart, newEnd, laneW, 'rgba(0,230,118,0.45)');
-            this._ghostOutlineLong(ctx, dstX, newStart, newEnd, laneW, 'rgba(0,230,118,1)');
+            if (dstIsDrag) {
+                // 롱노트 → 드래그 레인: 삭제 경고 (빨간 tint)
+                this._ghostDimLong(ctx, srcX, drag.rangeStart, drag.rangeEnd, laneW, 'rgba(255,60,60,0.45)');
+                this._ghostDimNormal(ctx, dstX, this.editDragCurAbsSlot, laneW, 'rgba(255,60,60,0.4)');
+                this._ghostOutlineNormal(ctx, dstX, this.editDragCurAbsSlot, laneW, 'rgba(255,60,60,1)');
+            } else {
+                const delta    = this.editDragCurAbsSlot - drag.srcAbsSlot;
+                const newStart = drag.rangeStart + delta;
+                const newEnd   = drag.rangeEnd   + delta;
+                this._ghostDimLong(ctx, dstX, newStart, newEnd, laneW, 'rgba(0,230,118,0.45)');
+                this._ghostOutlineLong(ctx, dstX, newStart, newEnd, laneW, 'rgba(0,230,118,1)');
+            }
         } else {
-            const ghostColor   = drag.value === '2' ? 'rgba(255,34,34,0.55)' : 'rgba(255,204,0,0.55)';
-            const outlineColor = drag.value === '2' ? 'rgba(255,34,34,1)'    : 'rgba(255,204,0,1)';
-            this._ghostDimNormal(ctx, dstX, this.editDragCurAbsSlot, laneW, ghostColor);
-            this._ghostOutlineNormal(ctx, dstX, this.editDragCurAbsSlot, laneW, outlineColor);
+            if (dstIsLane) {
+                // 드래그 노트 → 일반 레인: 일반 노트 색으로 표시
+                this._ghostDimNormal(ctx, dstX, this.editDragCurAbsSlot, laneW, 'rgba(255,51,102,0.55)');
+                this._ghostOutlineNormal(ctx, dstX, this.editDragCurAbsSlot, laneW, 'rgba(255,51,102,1)');
+            } else {
+                const ghostColor   = drag.value === '2' ? 'rgba(255,34,34,0.55)' : 'rgba(255,204,0,0.55)';
+                const outlineColor = drag.value === '2' ? 'rgba(255,34,34,1)'    : 'rgba(255,204,0,1)';
+                this._ghostDimNormal(ctx, dstX, this.editDragCurAbsSlot, laneW, ghostColor);
+                this._ghostOutlineNormal(ctx, dstX, this.editDragCurAbsSlot, laneW, outlineColor);
+            }
         }
 
         ctx.restore();
@@ -873,10 +927,12 @@ class Editor {
             const srcX = gridStartX + n.srcLaneIdx * laneW;
             const newLaneIdx = n.srcLaneIdx + laneDelta;
 
-            const isDrg  = n.noteType === 'drag';
-            const overflow = isDrg
-                ? (newLaneIdx < this.DRG_IDX_MIN || newLaneIdx > this.DRG_IDX_MAX)
-                : (newLaneIdx < this.LN_IDX_MIN  || newLaneIdx > this.LN_IDX_MAX);
+            const targetRendLane = (newLaneIdx >= 0 && newLaneIdx <= this.DRG_IDX_MAX)
+                ? this.renderer.laneNames[newLaneIdx] : null;
+            const overflow    = !targetRendLane || newLaneIdx < 0 || newLaneIdx > this.DRG_IDX_MAX;
+            const longToDrag  = !overflow && n.noteType === 'long' &&
+                                targetRendLane.startsWith('drag_');
+            const willDelete  = overflow || longToDrag;
 
             // 원래 위치 어둡게
             if (n.noteType === 'long') {
@@ -885,12 +941,20 @@ class Editor {
                 this._ghostDimNormal(ctx, srcX, n.srcAbsSlot, laneW, 'rgba(0,0,0,0.55)');
             }
 
-            if (!overflow) {
+            if (!willDelete) {
                 const dstX = gridStartX + newLaneIdx * laneW;
+                const tgtIsDrag = targetRendLane.startsWith('drag_');
+                const tgtIsLane = targetRendLane.startsWith('lane_');
+
                 if (n.noteType === 'normal') {
                     const na = n.srcAbsSlot + slotDelta;
-                    this._ghostDimNormal(ctx, dstX, na, laneW, 'rgba(255,51,102,0.50)');
-                    this._ghostOutlineNormal(ctx, dstX, na, laneW, 'rgba(255,51,102,1)');
+                    if (tgtIsDrag) {
+                        this._ghostDimNormal(ctx, dstX, na, laneW, 'rgba(255,145,0,0.50)');
+                        this._ghostOutlineNormal(ctx, dstX, na, laneW, 'rgba(255,145,0,1)');
+                    } else {
+                        this._ghostDimNormal(ctx, dstX, na, laneW, 'rgba(255,51,102,0.50)');
+                        this._ghostOutlineNormal(ctx, dstX, na, laneW, 'rgba(255,51,102,1)');
+                    }
                 } else if (n.noteType === 'long') {
                     const ns = n.rangeStart + slotDelta;
                     const ne = n.rangeEnd   + slotDelta;
@@ -898,13 +962,18 @@ class Editor {
                     this._ghostOutlineLong(ctx, dstX, ns, ne, laneW, 'rgba(0,230,118,1)');
                 } else {
                     const na = n.srcAbsSlot + slotDelta;
-                    const gc = n.value === '2' ? 'rgba(255,34,34,0.50)' : 'rgba(255,204,0,0.50)';
-                    const oc = n.value === '2' ? 'rgba(255,34,34,1)'    : 'rgba(255,204,0,1)';
-                    this._ghostDimNormal(ctx, dstX, na, laneW, gc);
-                    this._ghostOutlineNormal(ctx, dstX, na, laneW, oc);
+                    if (tgtIsLane) {
+                        this._ghostDimNormal(ctx, dstX, na, laneW, 'rgba(255,51,102,0.50)');
+                        this._ghostOutlineNormal(ctx, dstX, na, laneW, 'rgba(255,51,102,1)');
+                    } else {
+                        const gc = n.value === '2' ? 'rgba(255,34,34,0.50)' : 'rgba(255,204,0,0.50)';
+                        const oc = n.value === '2' ? 'rgba(255,34,34,1)'    : 'rgba(255,204,0,1)';
+                        this._ghostDimNormal(ctx, dstX, na, laneW, gc);
+                        this._ghostOutlineNormal(ctx, dstX, na, laneW, oc);
+                    }
                 }
             } else {
-                // 레인 범위 초과: 원래 위치에 빨간 경고 tint
+                // 삭제 대상: 원래 위치에 빨간 경고 tint
                 if (n.noteType === 'long') {
                     this._ghostDimLong(ctx, srcX, n.rangeStart, n.rangeEnd, laneW, 'rgba(255,60,60,0.45)');
                 } else {
