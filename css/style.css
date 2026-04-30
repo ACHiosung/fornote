@@ -237,6 +237,9 @@ canvas {
     display: block;
     cursor: crosshair;
 }
+canvas.cursor-note { cursor: crosshair; }
+canvas.cursor-edit  { cursor: default; }
+canvas.cursor-edit-grabbing { cursor: grabbing; }
 
 .code-font {
     font-family: monospace;
@@ -419,4 +422,49 @@ canvas {
 
 #play-btn.playing:hover {
     background-color: #aa4444;
+}
+
+/* Editor Mode Selector (note / edit) */
+.editor-mode-selector {
+    display: flex;
+    gap: 4px;
+}
+
+.editor-mode-btn {
+    flex: 1;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    border-radius: 6px;
+    padding: 5px 6px;
+    font-size: 0.82rem;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.15s;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.editor-mode-btn:hover {
+    background: rgba(255, 255, 255, 0.07);
+    color: var(--text-primary);
+}
+
+.editor-mode-btn.active {
+    background: var(--accent-color);
+    border-color: var(--accent-hover);
+    color: var(--text-primary);
+}
+
+/* Canvas cursor per editor mode */
+canvas.cursor-note {
+    cursor: crosshair;
+}
+
+canvas.cursor-edit {
+    cursor: default;
+}
+
+canvas.cursor-edit-grabbing {
+    cursor: grabbing;
 }
