@@ -28,6 +28,9 @@ class GridRenderer {
         /** 재생 커서 위치 (절대 슬롯, 소수 허용). null이면 미표시 */
         this.playbackCursorAbsSlot = null;
 
+        /** 렌더 완료 후 호출되는 콜백 (편집 모드 오버레이 등에 사용) */
+        this.postRenderCallback = null;
+
         this.init();
     }
 
@@ -168,6 +171,20 @@ class GridRenderer {
         const grid = this.noteData.activeGrid || spm;
         const snapInterval = Math.max(1, Math.round(spm / grid));
 
+        // 라인 유형별 최소 슬롯 간격 (px 단위) — 이보다 촘촘하면 해당 라인 스킵
+        const slotH = this.slotHeight;
+        const MIN_PX_BEAT    = 4;   // 박 선: 4px 이상일 때만 표시
+        const MIN_PX_SNAP    = 2;   // 그리드 스냅 선: 2px 이상일 때만 표시
+        const MIN_PX_SUBSLT  = 3;   // 비스냅 슬롯 선: 3px 이상일 때만 표시
+
+        const beatSpacingPx  = spb  >= 1 ? slotH * spb  : 0;
+        const snapSpacingPx  = slotH * snapInterval;
+        const subSlotSpacePx = slotH; // 슬롯 1개당 px
+
+        const drawBeatLines   = beatSpacingPx  >= MIN_PX_BEAT;
+        const drawSnapLines   = snapSpacingPx  >= MIN_PX_SNAP;
+        const drawSubSltLines = subSlotSpacePx >= MIN_PX_SUBSLT;
+
         ctx.lineWidth = 1;
         for (let m = 1; m <= this.noteData.totalMeasures; m++) {
             for (let s = 0; s < spm; s++) {
@@ -190,16 +207,20 @@ class GridRenderer {
                     ctx.fillText(`#${m.toString().padStart(3, '0')}`, gridEndX + this.measureLabelWidth - 10, y + 4);
                 } else if (isBeatLine) {
                     // ── 박 선 (중간 밝기) ──
+                    if (!drawBeatLines) continue;
                     ctx.strokeStyle = "rgba(255,255,255,0.25)";
                     ctx.lineWidth = 1.5;
                     ctx.beginPath(); ctx.moveTo(gridStartX, y); ctx.lineTo(gridEndX, y); ctx.stroke();
                     ctx.lineWidth = 1;
                 } else if (isGridSnap) {
                     // ── 현재 그리드 스냅 분할선 (청록색) ──
+                    if (!drawSnapLines) continue;
                     ctx.strokeStyle = "rgba(80,220,200,0.35)";
                     ctx.beginPath(); ctx.moveTo(gridStartX, y); ctx.lineTo(gridEndX, y); ctx.stroke();
                 } else {
                     // ── 비스냅 슬롯 (다른 그리드로 배치된 노트 위치 등) ──
+                    // slotHeight가 작을 때 수천 개의 반투명 선이 중첩되어 하얗게 되는 현상 방지
+                    if (!drawSubSltLines) continue;
                     ctx.strokeStyle = "rgba(255,255,255,0.03)";
                     ctx.beginPath(); ctx.moveTo(gridStartX, y); ctx.lineTo(gridEndX, y); ctx.stroke();
                 }
@@ -479,6 +500,11 @@ class GridRenderer {
             ctx.stroke();
             ctx.setLineDash([]);
             ctx.restore();
+        }
+
+        // ===== 6. postRender 콜백 (편집 모드 선택 오버레이 등) =====
+        if (typeof this.postRenderCallback === 'function') {
+            this.postRenderCallback();
         }
     }
 }

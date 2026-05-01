@@ -49,6 +49,7 @@
                 <span id="music-filename" class="info-tag" style="display:none;"></span>
                 <button id="play-btn" class="btn primary-btn">▶ 재생</button>
                 <button id="export-txt-btn" class="btn">TXT 내보내기</button>
+                <button id="export-json-btn" class="btn">JSON 내보내기</button>
                 <button id="midi-record-init-btn" class="btn">🎹 MIDI 녹음</button>
             </div>
         </header>
@@ -93,16 +94,6 @@
         <div class="main-content">
             <!-- Left Sidebar -->
             <aside class="sidebar">
-                <h3>편집 모드</h3>
-                <div class="tool-group" id="edit-mode-group">
-                    <button class="tool-btn active" data-mode="write">
-                        <span class="color-dot normal-dot"></span> 노트 쓰기
-                    </button>
-                    <button class="tool-btn" id="delete-mode-btn" data-mode="delete">
-                        <span class="color-dot delete-dot">X</span> 지우개
-                    </button>
-                </div>
-
                 <div class="tool-group">
                     <h3>그리드</h3>
                     <div class="grid-input-row">
@@ -121,16 +112,39 @@
                     </div>
                 </div>
 
-                <p class="help-text">
-                    <strong>조작:</strong><br/>
+                <div class="tool-group">
+                    <h3>모드</h3>
+                    <div class="editor-mode-selector" id="editor-mode-group">
+                        <button class="editor-mode-btn active" data-editor-mode="note" title="노트 모드 — 노트 생성/삭제">✏️ 노트</button>
+                        <button class="editor-mode-btn" data-editor-mode="edit" title="편집 모드 — 노트 위치 이동">🖱️ 편집</button>
+                    </div>
+                    <div id="note-mode-options" class="tool-group" style="margin-top:4px;">
+                        <button class="tool-btn active" data-mode="write">
+                            <span class="color-dot normal-dot"></span> 노트 쓰기
+                        </button>
+                        <button class="tool-btn" id="delete-mode-btn" data-mode="delete">
+                            <span class="color-dot delete-dot">X</span> 지우개
+                        </button>
+                    </div>
+                </div>
+
+                <p class="help-text" id="help-text-note">
+                    <strong>노트 모드:</strong><br/>
                     - 휠: 상하 스크롤<br/>
                     - Ctrl+휠: 줌 인/아웃<br/>
-                    - 좌클릭 (Ln 열): 일반 노트 배치<br/>
-                    - 드래그 (Ln 열): 롱노트 구간 설정<br/>
-                    - 클릭/드래그 (Drg 열): 드래그 노트<br/>
-                    - 노트 타입·레인은 마우스 위치로 자동 결정<br/>
+                    - 좌클릭 (Ln): 일반 노트<br/>
+                    - 드래그 (Ln): 롱노트 구간<br/>
+                    - 클릭/드래그 (Drg): 드래그 노트<br/>
                     <strong>재생 중:</strong><br/>
-                    - 휠: 마디 이동 (위=이전, 아래=다음)
+                    - 휠: 마디 이동
+                </p>
+                <p class="help-text" id="help-text-edit" style="display:none;">
+                    <strong>편집 모드:</strong><br/>
+                    - 노트 클릭+드래그:<br/>
+                    &nbsp;&nbsp;↕ 위아래 → 타이밍 이동<br/>
+                    &nbsp;&nbsp;↔ 좌우 → 레인 이동<br/>
+                    - 레인 이동 시 타이밍 유지<br/>
+                    - 롱노트도 이동 가능
                 </p>
             </aside>
 

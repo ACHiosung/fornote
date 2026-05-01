@@ -15,7 +15,27 @@ document.addEventListener('DOMContentLoaded', () => {
     // editor에 player 주입 (재생 중 휠 이동에 사용)
     editor.player = player;
 
-    // 2. 편집 모드 버튼
+    // 2a. 최상위 에디터 모드 버튼 (✏️ 노트 / 🖱️ 편집)
+    const editorModeBtns   = document.querySelectorAll('.editor-mode-btn');
+    const noteModeOptions  = document.getElementById('note-mode-options');
+    const helpTextNote     = document.getElementById('help-text-note');
+    const helpTextEdit     = document.getElementById('help-text-edit');
+
+    editorModeBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            editorModeBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const mode = btn.dataset.editorMode;
+            editor.setEditorMode(mode);
+            // 노트 모드 서브 옵션 표시/숨김
+            noteModeOptions.style.display = mode === 'note' ? '' : 'none';
+            // 도움말 텍스트 전환
+            helpTextNote.style.display = mode === 'note' ? '' : 'none';
+            helpTextEdit.style.display = mode === 'edit' ? '' : 'none';
+        });
+    });
+
+    // 2b. 노트 모드 내 서브 모드 버튼 (쓰기 / 지우개)
     const modeBtns = document.querySelectorAll('.tool-btn');
     modeBtns.forEach(btn => {
         btn.addEventListener('click', () => {
@@ -43,6 +63,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // 5. TXT 내보내기
     document.getElementById('export-txt-btn').addEventListener('click', () => {
         exporter.downloadTXT();
+    });
+
+    // 5c. JSON 내보내기
+    document.getElementById('export-json-btn').addEventListener('click', () => {
+        exporter.downloadJSON();
     });
 
     // ─────────────────────────────────────────────
