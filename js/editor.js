@@ -42,6 +42,10 @@ class Editor {
         // { notes: [...], anchorAbsSlot: number }
         this.clipboard = null;
 
+        // ── Undo 스택 (Ctrl+Z) ──
+        this.undoStack = [];
+        this.MAX_UNDO_STEPS = 50;
+
         // 노트 바 높이 계산 상수
         this.NOTE_MIN_HEIGHT        = 6;   // 최소 노트 높이 (px)
         this.NOTE_HEIGHT_RATIO      = 0.4; // slotHeight 대비 노트 높이 비율
@@ -82,6 +86,44 @@ class Editor {
     }
 
     // ═══════════════════════════════════════════════════════
+    //  Undo (Ctrl+Z)
+    // ═══════════════════════════════════════════════════════
+
+    /** 현재 noteData 상태를 undo 스택에 저장 */
+    _saveUndoSnapshot() {
+        const snapshot = {
+            lanes: {},
+            bpmChanges: this.noteData.bpmChanges.map(c => ({ ...c })),
+            tsChanges:  this.noteData.tsChanges.map(c => ({ ...c })),
+        };
+        for (const lane in this.noteData.lanes) {
+            snapshot.lanes[lane] = { ...this.noteData.lanes[lane] };
+        }
+        this.undoStack.push(snapshot);
+        if (this.undoStack.length > this.MAX_UNDO_STEPS) {
+            this.undoStack.shift();
+        }
+    }
+
+    /** 마지막 undo 스냅샷으로 되돌리기 */
+    _undo() {
+        if (this.undoStack.length === 0) return;
+        const snapshot = this.undoStack.pop();
+        for (const lane in snapshot.lanes) {
+            this.noteData.lanes[lane] = { ...snapshot.lanes[lane] };
+        }
+        this.noteData.bpmChanges = snapshot.bpmChanges.map(c => ({ ...c }));
+        this.noteData.tsChanges  = snapshot.tsChanges.map(c => ({ ...c }));
+        // 편집 상태 초기화
+        this.selection  = null;
+        this.editDrag   = null;
+        this.multiDrag  = null;
+        this.isDragging = false;
+        this.dragMoved  = false;
+        this.renderer.render();
+    }
+
+    // ═══════════════════════════════════════════════════════
     //  복사 / 붙여넣기 (Ctrl+C / Ctrl+V)
     // ═══════════════════════════════════════════════════════
 
@@ -101,6 +143,7 @@ class Editor {
      */
     _pasteClipboard() {
         if (!this.clipboard || this.clipboard.notes.length === 0) return;
+        this._saveUndoSnapshot();
 
         const targetMeasure = this._getPasteTargetMeasure();
         const spm = this.noteData.slotsPerMeasure;
@@ -217,12 +260,14 @@ class Editor {
             if (info.laneName === 'ts_change') {
                 let { measureIndex, slotIndex } = this.noteData.getMeasureAndSlotFromAbsolute(info.absSlot);
                 if (this.currentMode === 'delete') {
+                    this._saveUndoSnapshot();
                     this.noteData.removeTsChange(measureIndex, slotIndex);
                 } else {
                     const existing = this.noteData.tsChanges.find(
                         c => c.measureIndex === measureIndex && c.slotIndex === slotIndex
                     );
                     if (existing) {
+                        this._saveUndoSnapshot();
                         this.noteData.removeTsChange(measureIndex, slotIndex);
                     } else {
                         const input = window.prompt('박자 변경 입력 (예: 3/4, 2/4)', '3/4');
@@ -234,6 +279,7 @@ class Editor {
                             alert('올바른 박자 형식이 아닙니다. (예: 3/4)');
                             return;
                         }
+                        this._saveUndoSnapshot();
                         this.noteData.addTsChange(measureIndex, slotIndex, num, den);
                     }
                 }
@@ -242,6 +288,7 @@ class Editor {
             }
 
             if (this.currentMode === 'delete') {
+                this._saveUndoSnapshot();
                 let { measureIndex, slotIndex } = this.noteData.getMeasureAndSlotFromAbsolute(info.absSlot);
                 const laneType = info.laneName.split('_')[0];
                 if (laneType === 'lane') {
@@ -260,15 +307,18 @@ class Editor {
 
             const laneType = info.laneName.split('_')[0];
             if (laneType === 'lane') {
+                this._saveUndoSnapshot();
                 this.isDragging = true;
                 this.dragStartAbsSlot = info.absSlot;
                 this.dragStartLaneName = info.laneName;
                 this.dragMoved = false;
             } else if (laneType === 'drag') {
                 let { measureIndex, slotIndex } = this.noteData.getMeasureAndSlotFromAbsolute(info.absSlot);
+                this._saveUndoSnapshot();
                 this.noteData.toggleDragSlot(info.laneName, measureIndex, slotIndex);
                 this.renderer.render();
             } else if (laneType === 'long') {
+                this._saveUndoSnapshot();
                 this.isDragging = true;
                 this.dragStartAbsSlot = info.absSlot;
                 this.dragStartLaneName = info.laneName;
@@ -367,12 +417,14 @@ class Editor {
             }
         });
 
-        // ── Ctrl+C / Ctrl+V ──
+        // ── Ctrl+C / Ctrl+V / Ctrl+Z ──
         document.addEventListener('keydown', (e) => {
             if (e.ctrlKey && e.key === 'c') {
                 this._copySelection();
             } else if (e.ctrlKey && e.key === 'v') {
                 this._pasteClipboard();
+            } else if (e.ctrlKey && e.key === 'z') {
+                this._undo();
             }
         });
     }
@@ -485,6 +537,7 @@ class Editor {
         const moved = (newAbsSlot !== drag.srcAbsSlot) || (newLaneIdx !== drag.srcLaneIdx);
 
         if (moved) {
+            this._saveUndoSnapshot();
             const newLaneName = this.renderer.laneNames[newLaneIdx];
             const newLaneNum  = newLaneName ? newLaneName.split('_')[1] : drag.srcLaneNum;
             const targetIsDrag = newLaneName && newLaneName.startsWith('drag_');
@@ -826,6 +879,7 @@ class Editor {
         });
 
         // ── 4단계: 선택된 모든 노트 삭제 (범위 초과 포함) → 이동 가능 노트만 새 위치에 배치 ──
+        this._saveUndoSnapshot();
 
         // 전체 삭제 먼저 (이동 충돌 방지, 범위 초과 노트도 함께 삭제)
         for (const n of sel.notes) {
