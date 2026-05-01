@@ -1300,8 +1300,7 @@ class Editor {
      */
     _findClosestNoteInLane(laneName, laneIdx, targetAbsSlot) {
         const nd = this.noteData;
-        const laneType = laneName.split('_')[0];
-        const laneNum  = laneName.split('_')[1];
+        const [laneType, laneNum] = laneName.split('_');
 
         let best = null;
         let bestDist = Infinity;
