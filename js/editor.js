@@ -417,7 +417,7 @@ class Editor {
             }
         });
 
-        // ── Ctrl+C / Ctrl+V / Ctrl+Z ──
+        // ── Ctrl+C / Ctrl+V / Ctrl+Z / Arrow keys ──
         document.addEventListener('keydown', (e) => {
             if (e.ctrlKey && e.key === 'c') {
                 this._copySelection();
@@ -425,6 +425,10 @@ class Editor {
                 this._pasteClipboard();
             } else if (e.ctrlKey && e.key === 'z') {
                 this._undo();
+            } else if (e.key === 'ArrowLeft') {
+                if (this._selectAdjacentBar(-1)) e.preventDefault();
+            } else if (e.key === 'ArrowRight') {
+                if (this._selectAdjacentBar(+1)) e.preventDefault();
             }
         });
     }
@@ -979,6 +983,15 @@ class Editor {
         ctx.save();
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
+        // 일반 레인(lane_N)에서 단일 노트 선택 시 양옆 레인 흐림 효과
+        if (sel.notes.length === 1) {
+            const note = sel.notes[0];
+            const selLaneName = this.renderer.laneNames[note.srcLaneIdx];
+            if (selLaneName && selLaneName.startsWith('lane_')) {
+                this._drawNeighborDim(ctx, note.srcLaneIdx);
+            }
+        }
+
         for (const n of sel.notes) {
             const lx = gridStartX + n.srcLaneIdx * laneW;
             if (n.noteType === 'long') {
@@ -989,6 +1002,37 @@ class Editor {
         }
 
         ctx.restore();
+    }
+
+    /**
+     * laneIdx 기준으로 왼쪽(파란 계열)·오른쪽(주황 계열) lane_N 레인에
+     * 반투명 오버레이를 덧씌워 흐리게 표현한다.
+     */
+    _drawNeighborDim(ctx, laneIdx) {
+        const gridStartX = this.renderer.getGridStartX();
+        const laneW = this.renderer.laneWidth;
+        const h = this.renderer.height;
+        const laneNames = this.renderer.laneNames;
+
+        // 왼쪽 이웃 레인 (파란 계열 dim)
+        const leftIdx = laneIdx - 1;
+        if (leftIdx >= 0) {
+            const leftName = laneNames[leftIdx];
+            if (leftName && leftName.startsWith('lane_')) {
+                ctx.fillStyle = 'rgba(80, 120, 255, 0.30)';
+                ctx.fillRect(gridStartX + leftIdx * laneW, 0, laneW, h);
+            }
+        }
+
+        // 오른쪽 이웃 레인 (주황 계열 dim)
+        const rightIdx = laneIdx + 1;
+        if (rightIdx < laneNames.length) {
+            const rightName = laneNames[rightIdx];
+            if (rightName && rightName.startsWith('lane_')) {
+                ctx.fillStyle = 'rgba(255, 140, 60, 0.30)';
+                ctx.fillRect(gridStartX + rightIdx * laneW, 0, laneW, h);
+            }
+        }
     }
 
     /** 단일 노트 드래그 ghost 그리기 */
@@ -1203,6 +1247,135 @@ class Editor {
     // ═══════════════════════════════════════════════════════
     //  공통 헬퍼
     // ═══════════════════════════════════════════════════════
+
+    // ═══════════════════════════════════════════════════════
+    //  화살표 키 - 인접 레인 바 선택
+    // ═══════════════════════════════════════════════════════
+
+    /**
+     * 편집 모드에서 단일 노트가 선택되어 있을 때 왼쪽(-1) / 오른쪽(+1) 인접 레인의
+     * 가장 가까운 노트를 선택한다.
+     * @returns {boolean} 선택이 변경됐으면 true (기본 이벤트를 막을 용도)
+     */
+    _selectAdjacentBar(dir) {
+        if (this.editorMode !== 'edit') return false;
+        if (!this.selection || this.selection.notes.length !== 1) return false;
+
+        const note = this.selection.notes[0];
+        const curLaneIdx = note.srcLaneIdx;
+        const curAbsSlot = note.noteType === 'long' ? note.rangeStart : note.srcAbsSlot;
+
+        const newLaneIdx = curLaneIdx + dir;
+        if (newLaneIdx < 0 || newLaneIdx >= this.renderer.laneNames.length) return false;
+
+        const newLaneName = this.renderer.laneNames[newLaneIdx];
+        if (!newLaneName || newLaneName === 'bpm_change' || newLaneName === 'ts_change') return false;
+
+        const closest = this._findClosestNoteInLane(newLaneName, newLaneIdx, curAbsSlot);
+        if (!closest) return false;
+
+        const sSlot = closest.noteType === 'long' ? closest.rangeStart : closest.srcAbsSlot;
+        const eSlot = closest.noteType === 'long' ? closest.rangeEnd   : closest.srcAbsSlot;
+        this.selection = {
+            notes: [closest],
+            minLaneIdx: newLaneIdx,
+            maxLaneIdx: newLaneIdx,
+            minAbsSlot: sSlot,
+            maxAbsSlot: eSlot,
+        };
+
+        // 선택된 노트가 화면에 보이도록 스크롤
+        const { measureIndex, slotIndex } = this.noteData.getMeasureAndSlotFromAbsolute(sSlot);
+        const noteY = this.renderer.getY(measureIndex, slotIndex);
+        if (noteY < 40 || noteY > this.renderer.height - 40) {
+            this.renderer.scrollToMeasure(measureIndex);
+        }
+
+        this.renderer.render();
+        return true;
+    }
+
+    /**
+     * 주어진 레인에서 targetAbsSlot에 가장 가까운 노트를 찾아 반환한다.
+     */
+    _findClosestNoteInLane(laneName, laneIdx, targetAbsSlot) {
+        const nd = this.noteData;
+        const laneType = laneName.split('_')[0];
+        const laneNum  = laneName.split('_')[1];
+
+        let best = null;
+        let bestDist = Infinity;
+
+        if (laneType === 'lane') {
+            const normalLane = 'normal_' + laneNum;
+            const longLane   = 'long_'   + laneNum;
+
+            for (let m = 1; m <= nd.totalMeasures; m++) {
+                // 일반 노트
+                const normalData = nd.lanes[normalLane][m];
+                if (normalData) {
+                    for (let s = 0; s < normalData.length; s++) {
+                        if (normalData[s] !== '1') continue;
+                        const absSlot = nd.getAbsoluteSlotIndex(m, s);
+                        const dist = Math.abs(absSlot - targetAbsSlot);
+                        if (dist < bestDist) {
+                            bestDist = dist;
+                            best = {
+                                noteType: 'normal', srcLaneName: normalLane,
+                                srcLaneNum: laneNum, srcLaneIdx: laneIdx, srcAbsSlot: absSlot,
+                            };
+                        }
+                    }
+                }
+
+                // 롱노트
+                const longData = nd.lanes[longLane][m];
+                if (longData) {
+                    const visited = new Set();
+                    for (let s = 0; s < longData.length; s++) {
+                        if (longData[s] !== '1') continue;
+                        const absSlot = nd.getAbsoluteSlotIndex(m, s);
+                        const { rangeStart, rangeEnd } = this._getLongNoteRange(longLane, absSlot);
+                        const key = `${rangeStart}-${rangeEnd}`;
+                        if (visited.has(key)) continue;
+                        visited.add(key);
+                        const dist = Math.min(
+                            Math.abs(rangeStart - targetAbsSlot),
+                            Math.abs(rangeEnd   - targetAbsSlot)
+                        );
+                        if (dist < bestDist) {
+                            bestDist = dist;
+                            best = {
+                                noteType: 'long', srcLaneName: longLane,
+                                srcLaneNum: laneNum, srcLaneIdx: laneIdx,
+                                srcAbsSlot: rangeStart, rangeStart, rangeEnd,
+                            };
+                        }
+                    }
+                }
+            }
+        } else if (laneType === 'drag') {
+            for (let m = 1; m <= nd.totalMeasures; m++) {
+                const data = nd.lanes[laneName][m];
+                if (!data) continue;
+                for (let s = 0; s < data.length; s++) {
+                    if (data[s] !== '1' && data[s] !== '2') continue;
+                    const absSlot = nd.getAbsoluteSlotIndex(m, s);
+                    const dist = Math.abs(absSlot - targetAbsSlot);
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        best = {
+                            noteType: 'drag', srcLaneName: laneName,
+                            srcLaneNum: laneNum, srcLaneIdx: laneIdx,
+                            srcAbsSlot: absSlot, value: data[s],
+                        };
+                    }
+                }
+            }
+        }
+
+        return best;
+    }
 
     _getLongNoteRange(longLaneName, absSlot) {
         const totalSlots = this.noteData.totalMeasures * this.noteData.slotsPerMeasure;
