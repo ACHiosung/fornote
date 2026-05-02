@@ -135,9 +135,13 @@ class Editor {
     /** 현재 선택 영역을 클립보드에 복사 */
     _copySelection() {
         if (!this.selection || this.selection.notes.length === 0) return;
+        // anchorAbsSlot: 가장 빠른 노트를 포함하는 마디의 시작 슬롯.
+        // 붙여넣기 시 마디 내 상대 위치가 그대로 보존된다.
+        const spm = this.noteData.slotsPerMeasure;
+        const anchorAbsSlot = Math.floor(this.selection.minAbsSlot / spm) * spm;
         this.clipboard = {
             notes: this.selection.notes.map(n => ({ ...n })),
-            anchorAbsSlot: this.selection.minAbsSlot,
+            anchorAbsSlot,
         };
     }
 
