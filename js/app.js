@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const renderer = new GridRenderer('grid-canvas', noteData);
     const editor = new Editor('grid-canvas', noteData, renderer);
     const midiParser = new MidiParser(noteData, renderer);
+    const txtParser = new TxtParser(noteData, renderer);
     const exporter = new Exporter(noteData);
     const midiRecorder = new MidiInputRecorder(noteData, renderer);
     const player = new Player(noteData, renderer);
@@ -58,6 +59,19 @@ document.addEventListener('DOMContentLoaded', () => {
             e.target.value = '';
         };
         reader.readAsArrayBuffer(file);
+    });
+
+    // 4b. TXT 파일 업로드
+    document.getElementById('txt-upload').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            txtParser.loadFromText(event.target.result);
+            e.target.value = '';
+        };
+        reader.readAsText(file, 'utf-8');
     });
 
     // 5. TXT 내보내기
