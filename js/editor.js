@@ -1249,7 +1249,7 @@ class Editor {
         } else {
             // 수정자 키 단독(Shift 등)은 무시, 그 외엔 선택 해제
             const ignoreKeys = new Set(['Shift', 'CapsLock', 'Tab', 'Escape',
-                'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']);
+                'ArrowLeft', 'ArrowRight']);
             if (!ignoreKeys.has(e.key) && this.keyNote) {
                 this.keyNote = null;
                 this.renderer.render();
