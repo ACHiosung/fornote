@@ -20,7 +20,14 @@ class TxtParser {
         this.renderer = renderer;
     }
 
+    static _gcd(a, b) { while (b) { [a, b] = [b, a % b]; } return a; }
+    static _lcm(a, b) { return Math.round(a / TxtParser._gcd(a, b)) * b; }
+
     loadFromText(text) {
+        if (typeof text !== 'string' || text.trim().length === 0) {
+            this._showNotification('⚠️ 유효한 TXT 파일이 아닙니다.', true);
+            return;
+        }
         try {
             const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
 
@@ -71,7 +78,7 @@ class TxtParser {
             // slotsPerMeasure = 모든 pairCount 의 LCM
             let slotsPerMeasure = 1;
             for (const { pairCount } of channelEntries) {
-                slotsPerMeasure = NoteData._lcm(slotsPerMeasure, pairCount);
+                slotsPerMeasure = TxtParser._lcm(slotsPerMeasure, pairCount);
             }
             if (slotsPerMeasure < 1) slotsPerMeasure = 16;
 
@@ -110,7 +117,7 @@ class TxtParser {
                 const measureIndex = bar + 1; // 1-indexed
                 if (measureIndex > totalMeasures) continue;
 
-                const step = slotsPerMeasure / pairCount; // LCM 보장이므로 항상 정수
+                const step = Math.floor(slotsPerMeasure / pairCount); // LCM 보장이므로 항상 정수
 
                 if (channel === 8) {
                     // BPM 변화 채널
@@ -143,7 +150,7 @@ class TxtParser {
 
             // 로드된 노트 수 집계
             let noteCount = 0;
-            for (const lane in this.noteData.lanes) {
+            for (const lane of Object.keys(this.noteData.lanes)) {
                 for (const m of Object.keys(this.noteData.lanes[lane])) {
                     const data = this.noteData.lanes[lane][m];
                     if (data) noteCount += (data.match(/[12]/g) || []).length;
