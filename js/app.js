@@ -109,7 +109,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (player.isPlaying) {
             player.stop();
         } else {
-            player.play(1);
+            player.resume();
         }
     });
 
@@ -117,6 +117,10 @@ document.addEventListener('DOMContentLoaded', () => {
         playBtn.textContent = isPlaying ? '■ 정지' : '▶ 재생';
         playBtn.classList.toggle('playing', isPlaying);
     };
+
+    document.getElementById('restart-btn').addEventListener('click', () => {
+        player.play(1);
+    });
 
     // 6. 줌 컨트롤
     document.getElementById('zoom-in-btn').addEventListener('click', () => {

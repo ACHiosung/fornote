@@ -18,6 +18,7 @@ class Player {
         this.isPlaying = false;
         this.startCtxTime = 0;   // audioCtx.currentTime when play() was called
         this.startOffset = 0;    // playback offset from song start (seconds)
+        this.pausedOffset = 0;   // saved offset when stopped mid-playback (seconds)
         this._seeking = false;
 
         this.rafId = null;
@@ -205,14 +206,24 @@ class Player {
 
     // ── 재생 시작 (fromMeasure: 1-indexed) ──
     async play(fromMeasure = 1) {
+        const fromOffset = this._getTimeForAbsSlot(
+            (fromMeasure - 1) * this.noteData.slotsPerMeasure
+        );
+        return this._playFromOffset(fromOffset);
+    }
+
+    // ── 일시정지 위치부터 재개 ──
+    async resume() {
+        return this._playFromOffset(this.pausedOffset);
+    }
+
+    // ── 내부: 초(seconds) 오프셋 기준으로 재생 시작 ──
+    async _playFromOffset(fromOffset) {
         this._ensureAudioContext();
         await this._ensureTambourine();
 
         this._stopSources();
 
-        const fromOffset = this._getTimeForAbsSlot(
-            (fromMeasure - 1) * this.noteData.slotsPerMeasure
-        );
         this.startOffset = fromOffset;
         this.startCtxTime = this.audioCtx.currentTime;
         this.isPlaying = true;
@@ -247,9 +258,10 @@ class Player {
         if (this.onPlayStateChange) this.onPlayStateChange(true);
     }
 
-    // ── 재생 중지 ──
+    // ── 재생 중지 (현재 위치 기억) ──
     stop() {
         if (!this.isPlaying) return;
+        this.pausedOffset = this.getCurrentTimeSeconds();
         this._stopSources();
         this._stopRAF();
         this.isPlaying = false;
@@ -300,6 +312,7 @@ class Player {
     _onEnded() {
         this._stopRAF();
         this.isPlaying = false;
+        this.pausedOffset = 0;
         this.renderer.setPlaybackCursor(null);
         if (this.onPlayStateChange) this.onPlayStateChange(false);
     }
