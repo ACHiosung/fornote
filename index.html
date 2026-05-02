@@ -41,6 +41,10 @@
                     MIDI 로드
                     <input type="file" id="midi-upload" accept=".mid,.midi">
                 </label>
+                <label class="btn">
+                    TXT 로드
+                    <input type="file" id="txt-upload" accept=".txt">
+                </label>
                 <span id="midi-bpm-lock-notice" class="info-tag midi-bpm-lock hidden">⚠ 이미 MIDI 파일을 불러왔으니 BPM 변경이 불가합니다</span>
                 <label class="btn" id="music-upload-label" title="재생할 음악 파일 선택 (MP3, OGG, WAV 등)">
                     🎵 음악 로드
@@ -48,6 +52,7 @@
                 </label>
                 <span id="music-filename" class="info-tag" style="display:none;"></span>
                 <button id="play-btn" class="btn primary-btn">▶ 재생</button>
+                <button id="restart-btn" class="btn" title="처음부터 재생">↩ 처음부터</button>
                 <button id="export-txt-btn" class="btn">TXT 내보내기</button>
                 <button id="export-json-btn" class="btn">JSON 내보내기</button>
                 <button id="midi-record-init-btn" class="btn">🎹 MIDI 녹음</button>
@@ -168,6 +173,7 @@
 
     <script src="js/note-data.js"></script>
     <script src="js/midi-parser.js"></script>
+    <script src="js/txt-parser.js"></script>
     <script src="js/midi-input-recorder.js"></script>
     <script src="js/grid-renderer.js"></script>
     <script src="js/editor.js"></script>

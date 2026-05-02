@@ -42,6 +42,10 @@ class Editor {
         // { notes: [...], anchorAbsSlot: number }
         this.clipboard = null;
 
+        // ── 키보드 노트 배치 선택 상태 (a/s/d 단축키) ──
+        // { absSlot, laneIdx }  laneIdx 0/1/2 = lane_1/2/3 에 대응
+        this.keyNote = null;
+
         // ── Undo 스택 (Ctrl+Z) ──
         this.undoStack = [];
         this.MAX_UNDO_STEPS = 50;
@@ -80,6 +84,7 @@ class Editor {
         this.rectSel     = null;
         this.selection   = null;
         this.multiDrag   = null;
+        this.keyNote     = null;
         this.canvas.classList.remove('cursor-note', 'cursor-edit', 'cursor-edit-grabbing');
         this.canvas.classList.add(mode === 'edit' ? 'cursor-edit' : 'cursor-note');
         this.renderer.render();
@@ -130,9 +135,13 @@ class Editor {
     /** 현재 선택 영역을 클립보드에 복사 */
     _copySelection() {
         if (!this.selection || this.selection.notes.length === 0) return;
+        // anchorAbsSlot: 가장 빠른 노트를 포함하는 마디의 시작 슬롯.
+        // 붙여넣기 시 마디 내 상대 위치가 그대로 보존된다.
+        const spm = this.noteData.slotsPerMeasure;
+        const anchorAbsSlot = Math.floor(this.selection.minAbsSlot / spm) * spm;
         this.clipboard = {
             notes: this.selection.notes.map(n => ({ ...n })),
-            anchorAbsSlot: this.selection.minAbsSlot,
+            anchorAbsSlot,
         };
     }
 
@@ -244,6 +253,8 @@ class Editor {
         // ── mousedown ──
         this.canvas.addEventListener('mousedown', (e) => {
             if (e.button !== 0) return;
+            // 마우스 클릭 시 키보드 배치 선택 해제
+            if (this.keyNote) { this.keyNote = null; this.renderer.render(); }
             const info = this.getSlotInfoFromEvent(e);
 
             // ────────────── 편집 모드 ──────────────
@@ -417,7 +428,7 @@ class Editor {
             }
         });
 
-        // ── Ctrl+C / Ctrl+V / Ctrl+Z ──
+        // ── Ctrl+C / Ctrl+V / Ctrl+Z + 키보드 노트 배치 (a/s/d, 화살표) ──
         document.addEventListener('keydown', (e) => {
             if (e.ctrlKey && e.key === 'c') {
                 this._copySelection();
@@ -425,6 +436,13 @@ class Editor {
                 this._pasteClipboard();
             } else if (e.ctrlKey && e.key === 'z') {
                 this._undo();
+            } else {
+                // 입력 요소에 포커스된 경우 단축키 비활성화
+                const tag = (document.activeElement || {}).tagName || '';
+                const isInput = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+                if (!isInput && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                    this._handleKeyboardNoteShortcut(e);
+                }
             }
         });
     }
@@ -969,7 +987,8 @@ class Editor {
     /** 선택된 노트 하이라이트 (postRenderCallback에서 호출) */
     _drawSelectionHighlights() {
         const sel = this.selection;
-        if (!sel || !sel.notes || sel.notes.length === 0) return;
+        const kn  = this.keyNote;
+        if ((!sel || !sel.notes || sel.notes.length === 0) && !kn) return;
 
         const ctx = this.renderer.ctx;
         const dpr = this.renderer.dpr;
@@ -979,13 +998,22 @@ class Editor {
         ctx.save();
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-        for (const n of sel.notes) {
-            const lx = gridStartX + n.srcLaneIdx * laneW;
-            if (n.noteType === 'long') {
-                this._ghostOutlineLong(ctx, lx, n.rangeStart, n.rangeEnd, laneW, 'rgba(100,200,255,0.9)');
-            } else {
-                this._ghostOutlineNormal(ctx, lx, n.srcAbsSlot, laneW, 'rgba(100,200,255,0.9)');
+        if (sel && sel.notes) {
+            for (const n of sel.notes) {
+                const lx = gridStartX + n.srcLaneIdx * laneW;
+                if (n.noteType === 'long') {
+                    this._ghostOutlineLong(ctx, lx, n.rangeStart, n.rangeEnd, laneW, 'rgba(100,200,255,0.9)');
+                } else {
+                    this._ghostOutlineNormal(ctx, lx, n.srcAbsSlot, laneW, 'rgba(100,200,255,0.9)');
+                }
             }
+        }
+
+        // 키보드 배치 노트: 밝게 빛나는 흰색 외곽선
+        if (kn) {
+            const lx = gridStartX + kn.laneIdx * laneW;
+            this._ghostDimNormal(ctx, lx, kn.absSlot, laneW, 'rgba(255,255,255,0.25)');
+            this._ghostOutlineNormal(ctx, lx, kn.absSlot, laneW, 'rgba(255,255,255,1)');
         }
 
         ctx.restore();
@@ -1198,6 +1226,111 @@ class Editor {
     _setEditCursor(grabbing) {
         this.canvas.classList.remove('cursor-edit', 'cursor-edit-grabbing');
         this.canvas.classList.add(grabbing ? 'cursor-edit-grabbing' : 'cursor-edit');
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  키보드 노트 배치 (a/s/d 단축키)
+    // ═══════════════════════════════════════════════════════
+
+    /**
+     * a/s/d → lane1/2/3 노트 배치, 화살키 → 선택 노트 이동, 그 외 → 선택 해제.
+     * 재생 중이 아닐 때만 동작.
+     */
+    _handleKeyboardNoteShortcut(e) {
+        const player = this.player;
+        if (!player || player.isPlaying) {
+            if (this.keyNote) { this.keyNote = null; this.renderer.render(); }
+            return;
+        }
+
+        if (e.key === 'a' || e.key === 's' || e.key === 'd') {
+            const laneIdx = e.key === 'a' ? 0 : e.key === 's' ? 1 : 2;
+            this._placeKeyNote(laneIdx);
+            e.preventDefault();
+        } else if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && this.keyNote) {
+            this._moveKeyNote(e.key === 'ArrowUp' ? 1 : -1);
+            e.preventDefault();
+        } else {
+            // 수정자 키 단독(Shift 등)은 무시, 그 외엔 선택 해제
+            const ignoreKeys = new Set(['Shift', 'CapsLock', 'Tab', 'Escape',
+                'ArrowLeft', 'ArrowRight']);
+            if (!ignoreKeys.has(e.key) && this.keyNote) {
+                this.keyNote = null;
+                this.renderer.render();
+            }
+        }
+    }
+
+    /** pausedOffset 기준 그리드 스냅 absSlot에 normal_N 노트 배치 후 선택 */
+    _placeKeyNote(laneIdx) {
+        const player = this.player;
+        const nd  = this.noteData;
+        const spm = nd.slotsPerMeasure;
+        const grid = nd.activeGrid || spm;
+        const snapInterval = Math.max(1, Math.round(spm / grid));
+
+        const rawAbsSlot = player._getAbsSlotForTime(player.pausedOffset);
+        const absSlot = Math.min(
+            nd.totalMeasures * spm - 1,
+            Math.max(0, Math.round(rawAbsSlot / snapInterval) * snapInterval)
+        );
+
+        const laneName = 'normal_' + (laneIdx + 1);
+        const { measureIndex, slotIndex } = nd.getMeasureAndSlotFromAbsolute(absSlot);
+
+        this._saveUndoSnapshot();
+        nd.setSlot(laneName, measureIndex, slotIndex, '1');
+
+        this.keyNote = { absSlot, laneIdx };
+        this.renderer.render();
+
+        // 배치 위치가 화면에 보이도록 스크롤
+        const noteY = this.renderer.getY(measureIndex, slotIndex);
+        const margin = 60;
+        if (noteY < margin) {
+            this.renderer.scroll(-(margin - noteY));
+        } else if (noteY > this.renderer.height - margin) {
+            this.renderer.scroll(this.renderer.height - margin - noteY);
+        }
+    }
+
+    /**
+     * 선택된 keyNote를 그리드 한 칸 이동.
+     * dir: +1 = 화면 위쪽(absSlot 증가, 시간상 뒤), -1 = 화면 아래쪽(absSlot 감소, 시간상 앞).
+     */
+    _moveKeyNote(dir) {
+        const kn  = this.keyNote;
+        const nd  = this.noteData;
+        const spm = nd.slotsPerMeasure;
+        const grid = nd.activeGrid || spm;
+        const snapInterval = Math.max(1, Math.round(spm / grid));
+        const totalSlots = nd.totalMeasures * spm;
+
+        const newAbsSlot = Math.min(totalSlots - 1,
+            Math.max(0, kn.absSlot + dir * snapInterval));
+        if (newAbsSlot === kn.absSlot) return;
+
+        const laneName = 'normal_' + (kn.laneIdx + 1);
+        const { measureIndex: oldM, slotIndex: oldS } =
+            nd.getMeasureAndSlotFromAbsolute(kn.absSlot);
+        const { measureIndex: newM, slotIndex: newS } =
+            nd.getMeasureAndSlotFromAbsolute(newAbsSlot);
+
+        this._saveUndoSnapshot();
+        nd.setSlot(laneName, oldM, oldS, '0');
+        nd.setSlot(laneName, newM, newS, '1');
+
+        kn.absSlot = newAbsSlot;
+        this.renderer.render();
+
+        // 이동 후 노트가 화면에 보이도록 스크롤
+        const noteY = this.renderer.getY(newM, newS);
+        const margin = 60;
+        if (noteY < margin) {
+            this.renderer.scroll(-(margin - noteY));
+        } else if (noteY > this.renderer.height - margin) {
+            this.renderer.scroll(this.renderer.height - margin - noteY);
+        }
     }
 
     // ═══════════════════════════════════════════════════════
